@@ -49,11 +49,6 @@ export default function CooperativeDemandForecastPage() {
           <div className="pt-2 text-xs text-gray-500">
             Current bookings recorded: <strong>{forecast?.total_bookings_analyzed || 0}</strong>
           </div>
-          <div className="pt-4">
-            <span className="text-xs text-gray-400 block mb-3">
-              Tip: You can load the optional demo data from the top banner anytime to test live forecasting predictions.
-            </span>
-          </div>
         </div>
       ) : (
         /* LIVE FORECAST VIEW */

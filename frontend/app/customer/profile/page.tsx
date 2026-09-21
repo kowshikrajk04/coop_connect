@@ -73,7 +73,7 @@ export default function CustomerProfilePage() {
             <span className="text-gray-400 block text-[10px] uppercase font-bold">Email Address</span>
             <div className="flex items-center gap-1.5 font-semibold text-gray-900 mt-1">
               <Mail className="w-3.5 h-3.5 text-gray-400" />
-              <span>{profile?.email || "customer@demo.com"}</span>
+              <span>{profile?.email || "—"}</span>
             </div>
           </div>
         </div>

@@ -131,7 +131,7 @@ export default function WorkerVerificationPage() {
             href="/signup/worker"
             className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-sm transition inline-flex items-center gap-2"
           >
-            <span>Register a Worker (Test Flow)</span>
+            <span>Register a Worker</span>
           </Link>
         </div>
       ) : (

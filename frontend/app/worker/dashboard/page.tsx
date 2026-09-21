@@ -30,7 +30,7 @@ export default function WorkerDashboard() {
 
   // Completion modal state
   const [completingJobId, setCompletingJobId] = useState<number | null>(null);
-  const [completionPhotoUrl, setCompletionPhotoUrl] = useState("https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=400&q=80");
+  const [completionPhotoUrl, setCompletionPhotoUrl] = useState("");
   const [completionNotes, setCompletionNotes] = useState("");
   const [isSubmittingCompletion, setIsSubmittingCompletion] = useState(false);
 
@@ -563,7 +563,7 @@ export default function WorkerDashboard() {
                   className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs"
                 />
                 <span className="text-[10px] text-gray-400 mt-1 block">
-                  Takes a simulated photo of repaired switchboard, faucet, or cleaned area.
+                  Upload or link a photo of the completed repair or service proof.
                 </span>
               </div>
 

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { 
   Users, Shield, Briefcase, UserCheck, Bell, LogOut, 
-  Menu, X, Sparkles, RefreshCw, Layers, CheckCircle2, AlertCircle
+  Menu, X, Layers, CheckCircle2, AlertCircle
 } from "lucide-react";
 import { getUserRole, getUserName, clearAuthData, setAuthData, api } from "@/lib/api";
 
@@ -17,8 +17,6 @@ export default function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
-  const [demoBannerMsg, setDemoBannerMsg] = useState<string | null>(null);
-  const [isLoadingDemo, setIsLoadingDemo] = useState(false);
 
   useEffect(() => {
     const currentRole = getUserRole();
@@ -40,107 +38,8 @@ export default function Navbar() {
     router.push("/login");
   };
 
-  const handleSeedDemo = async () => {
-    setIsLoadingDemo(true);
-    try {
-      const res = await api.demo.seed();
-      setDemoBannerMsg("Demo data loaded successfully! You can now test allocations and forecasts.");
-      setTimeout(() => setDemoBannerMsg(null), 6000);
-      window.location.reload();
-    } catch (err: any) {
-      alert(err.message || "Failed to seed demo data");
-    } finally {
-      setIsLoadingDemo(false);
-    }
-  };
-
-  const handleResetEmpty = async () => {
-    setIsLoadingDemo(true);
-    try {
-      const res = await api.demo.reset();
-      setDemoBannerMsg("Platform reset to 100% clean empty state.");
-      setTimeout(() => setDemoBannerMsg(null), 6000);
-      window.location.reload();
-    } catch (err: any) {
-      alert(err.message || "Failed to reset");
-    } finally {
-      setIsLoadingDemo(false);
-    }
-  };
-
-  // Quick switch between accounts for test review
-  const switchDemoAccount = async (targetRole: "CUSTOMER" | "WORKER" | "COOPERATIVE") => {
-    try {
-      let email = "customer@demo.com";
-      let pwd = "DemoPass123!";
-      if (targetRole === "WORKER") {
-        email = "worker@demo.com";
-      } else if (targetRole === "COOPERATIVE") {
-        email = "cooperative@delhi.gov.in";
-        pwd = "CoopPass123!";
-      }
-
-      const res = await api.auth.login(email, pwd);
-      setAuthData(res.access_token, res.role, res.name, res.user_id);
-      setRole(res.role);
-      setName(res.name);
-      
-      if (res.role === "CUSTOMER") router.push("/customer/dashboard");
-      else if (res.role === "WORKER") router.push("/worker/dashboard");
-      else router.push("/cooperative/dashboard");
-    } catch (e) {
-      alert("Please click 'Load Demo Data' first to create demonstration accounts, or sign up as a new user.");
-    }
-  };
-
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
-      {/* Top Demo State Bar */}
-      <div className="bg-slate-50 border-b border-gray-100 px-4 py-1.5 text-xs text-gray-600 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-100">
-            Cooperative Platform
-          </span>
-          <span className="hidden sm:inline text-gray-500">
-            Transparent labour cooperatives for India
-          </span>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleSeedDemo}
-            disabled={isLoadingDemo}
-            className="flex items-center gap-1.5 font-medium text-blue-700 hover:text-blue-800 bg-white px-2.5 py-1 rounded border border-blue-200 shadow-2xs hover:bg-blue-50 transition"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-            <span>Load Demo Data (Optional)</span>
-          </button>
-
-          <button
-            onClick={handleResetEmpty}
-            disabled={isLoadingDemo}
-            className="flex items-center gap-1.5 font-medium text-gray-600 hover:text-gray-900 bg-white px-2.5 py-1 rounded border border-gray-200 shadow-2xs hover:bg-gray-50 transition"
-            title="Wipe database back to initial empty state"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 text-gray-500 ${isLoadingDemo ? "animate-spin" : ""}`} />
-            <span>Reset to Empty State</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Demo Notification Alert */}
-      {demoBannerMsg && (
-        <div className="bg-blue-600 text-white px-4 py-2 text-sm flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-white" />
-            <span>{demoBannerMsg}</span>
-          </div>
-          <button onClick={() => setDemoBannerMsg(null)} className="text-white hover:text-blue-100">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
       {/* Main Navigation Bar */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">

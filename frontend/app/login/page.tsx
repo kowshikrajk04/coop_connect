@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Shield, ArrowRight, AlertCircle, Users, Wrench, Building2 } from "lucide-react";
+import { Shield, ArrowRight, AlertCircle } from "lucide-react";
 import { api, setAuthData } from "@/lib/api";
 
 export default function LoginPage() {
@@ -37,11 +37,6 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleQuickFill = (id: string, pwd: string) => {
-    setLoginId(id);
-    setPassword(pwd);
   };
 
   return (
@@ -101,40 +96,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Quick Demo Credentials Box */}
-        <div className="mt-8 pt-6 border-t border-gray-100">
-          <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block text-center mb-3">
-            Quick Test Credentials (Optional)
-          </span>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => handleQuickFill("customer@demo.com", "DemoPass123!")}
-              className="px-2 py-1.5 rounded-lg border border-gray-200 text-[11px] font-medium text-gray-700 hover:bg-blue-50 hover:border-blue-200 text-center"
-            >
-              Customer
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickFill("worker@demo.com", "DemoPass123!")}
-              className="px-2 py-1.5 rounded-lg border border-gray-200 text-[11px] font-medium text-gray-700 hover:bg-emerald-50 hover:border-emerald-200 text-center"
-            >
-              Worker
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickFill("cooperative@delhi.gov.in", "CoopPass123!")}
-              className="px-2 py-1.5 rounded-lg border border-gray-200 text-[11px] font-medium text-gray-700 hover:bg-indigo-50 hover:border-indigo-200 text-center"
-            >
-              Cooperative
-            </button>
-          </div>
-          <p className="text-[10px] text-gray-400 text-center mt-2">
-            Note: If logging in with demo accounts, ensure demo data is loaded using the top button.
-          </p>
-        </div>
-
-        <div className="text-center mt-6 pt-4 border-t border-gray-100 text-xs text-gray-500">
+        <div className="text-center mt-6 pt-6 border-t border-gray-100 text-xs text-gray-500">
           Don't have an account yet?{" "}
           <Link href="/signup/choose-role" className="font-semibold text-blue-600 hover:underline">
             Choose your account type

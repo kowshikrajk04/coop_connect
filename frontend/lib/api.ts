@@ -282,8 +282,4 @@ export const api = {
         body: JSON.stringify({ reason }),
       }),
   },
-  demo: {
-    seed: () => request("/api/demo/seed", { method: "POST" }),
-    reset: () => request("/api/demo/reset", { method: "POST" }),
-  },
 };

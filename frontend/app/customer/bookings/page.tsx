@@ -393,7 +393,7 @@ export default function CustomerBookingsPage() {
                 <div>
                   <h3 className="text-2xl font-extrabold text-gray-900">Payment Successful</h3>
                   <p className="text-xs text-gray-500 mt-1">
-                    Your payment was verified and processed securely in Razorpay Test Mode.
+                    Your payment was verified and processed securely via Razorpay.
                   </p>
                 </div>
 
@@ -490,7 +490,7 @@ export default function CustomerBookingsPage() {
                 </div>
 
                 <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[11px] text-gray-500">
-                  <span className="font-medium text-gray-700">Razorpay TEST MODE</span>
+                  <span className="font-medium text-gray-700">Razorpay Secure Payment</span>
                   <span className="text-gray-500">UPI • Card • Net Banking</span>
                 </div>
 
