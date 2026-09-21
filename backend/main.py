@@ -8,7 +8,7 @@ from database import engine, Base, get_db, check_db_connection
 import models
 from routers import (
     auth, customer, worker, cooperative, bookings, 
-    payments, demand_forecast, notifications, demo_data, assessment, memberships, feedback
+    payments, demand_forecast, notifications, assessment, memberships, feedback
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -80,7 +80,6 @@ app.include_router(bookings.router)
 app.include_router(payments.router)
 app.include_router(demand_forecast.router)
 app.include_router(notifications.router)
-app.include_router(demo_data.router)
 app.include_router(assessment.router)
 app.include_router(memberships.router)
 app.include_router(feedback.router)

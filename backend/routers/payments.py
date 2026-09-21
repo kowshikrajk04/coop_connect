@@ -207,7 +207,7 @@ def verify_payment(
         "welfare_contribution": payment.welfare_contribution,
         "transaction_id": payment.transaction_id,
         "razorpay_payment_id": req.razorpay_payment_id,
-        "payment_method": "Razorpay (Test Mode)"
+        "payment_method": "Razorpay"
     }
 
     existing_invoice = db.query(models.Invoice).filter(models.Invoice.payment_id == payment.id).first()
