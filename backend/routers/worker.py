@@ -1,5 +1,5 @@
 import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from database import get_db
 import models
@@ -59,6 +59,9 @@ def get_worker_profile(user: models.User = Depends(get_current_user), db: Sessio
         "id_document_url": worker.id_document_url,
         "cert_document_url": worker.cert_document_url,
         "status": worker.status,
+        "membership_status": worker.membership_status or "NOT_JOINED",
+        "cooperative_id": worker.cooperative_id,
+        "cooperative_name": worker.cooperative.name if worker.cooperative else None,
         "is_available": worker.is_available,
         "rating": worker.rating,
         "total_jobs": worker.total_jobs,
@@ -86,18 +89,70 @@ def update_worker_skills(payload: schemas.SkillsUpdatePayload, user: models.User
     db.commit()
     return {"success": True, "message": "Skills updated successfully."}
 
+import uuid
+from pathlib import Path
+
 @router.post("/documents")
-def update_worker_documents(payload: schemas.DocumentsUpdatePayload, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def update_worker_documents(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     if user.role != "WORKER" or not user.worker:
         raise HTTPException(status_code=403, detail="Worker access required.")
-    
-    if payload.id_document_url:
-        user.worker.id_document_url = payload.id_document_url
-    if payload.cert_document_url:
-        user.worker.cert_document_url = payload.cert_document_url
-    if payload.experience_proof_url:
-        user.worker.experience_proof_url = payload.experience_proof_url
-    
+
+    content_type = request.headers.get("content-type", "")
+    uploads_dir = Path(__file__).resolve().parent.parent / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+
+        # 1. Identity Document file
+        id_file = form.get("id_document") or form.get("file") or form.get("document")
+        if id_file and hasattr(id_file, "filename") and id_file.filename:
+            ext = Path(id_file.filename).suffix.lower()
+            safe_name = f"worker_id_{uuid.uuid4().hex[:12]}{ext}"
+            file_path = uploads_dir / safe_name
+            content = await id_file.read()
+            with open(file_path, "wb") as f:
+                f.write(content)
+            user.worker.id_document_url = f"/uploads/{safe_name}"
+        elif form.get("id_document_url"):
+            user.worker.id_document_url = str(form.get("id_document_url")).strip()
+
+        # 2. Skill Certificate file
+        cert_file = form.get("cert_document") or form.get("certificate")
+        if cert_file and hasattr(cert_file, "filename") and cert_file.filename:
+            ext = Path(cert_file.filename).suffix.lower()
+            safe_name = f"worker_cert_{uuid.uuid4().hex[:12]}{ext}"
+            file_path = uploads_dir / safe_name
+            content = await cert_file.read()
+            with open(file_path, "wb") as f:
+                f.write(content)
+            user.worker.cert_document_url = f"/uploads/{safe_name}"
+        elif form.get("cert_document_url"):
+            user.worker.cert_document_url = str(form.get("cert_document_url")).strip()
+
+        # 3. Experience Proof file
+        exp_file = form.get("experience_proof") or form.get("exp_document")
+        if exp_file and hasattr(exp_file, "filename") and exp_file.filename:
+            ext = Path(exp_file.filename).suffix.lower()
+            safe_name = f"worker_exp_{uuid.uuid4().hex[:12]}{ext}"
+            file_path = uploads_dir / safe_name
+            content = await exp_file.read()
+            with open(file_path, "wb") as f:
+                f.write(content)
+            user.worker.experience_proof_url = f"/uploads/{safe_name}"
+        elif form.get("experience_proof_url"):
+            user.worker.experience_proof_url = str(form.get("experience_proof_url")).strip()
+
+    else:
+        body = await request.json()
+        payload = schemas.DocumentsUpdatePayload(**body)
+        if payload.id_document_url:
+            user.worker.id_document_url = payload.id_document_url
+        if payload.cert_document_url:
+            user.worker.cert_document_url = payload.cert_document_url
+        if payload.experience_proof_url:
+            user.worker.experience_proof_url = payload.experience_proof_url
+
     db.commit()
     return {"success": True, "message": "Verification documents recorded."}
 

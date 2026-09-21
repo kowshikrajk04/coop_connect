@@ -58,7 +58,7 @@ def get_customer_bookings(user: models.User = Depends(get_current_user), db: Ses
                 "photo": b.worker.profile_photo
             }
         
-        has_paid = b.payment and b.payment.status == "PAID"
+        has_paid = (b.payment and b.payment.status == "PAID") or (getattr(b, "payment_status", None) == "PAID")
         has_rated = b.rating is not None
 
         item = {
@@ -72,6 +72,7 @@ def get_customer_bookings(user: models.User = Depends(get_current_user), db: Ses
             "scheduled_time": b.scheduled_time,
             "customer_address": b.customer_address,
             "status": b.status,
+            "payment_status": getattr(b, "payment_status", "PAID" if has_paid else "PENDING"),
             "total_amount": b.total_amount,
             "created_at": b.created_at.isoformat(),
             "worker": worker_info,
@@ -81,7 +82,9 @@ def get_customer_bookings(user: models.User = Depends(get_current_user), db: Ses
             "payment": {
                 "id": b.payment.id,
                 "status": b.payment.status,
-                "method": b.payment.payment_method
+                "method": b.payment.payment_method,
+                "transaction_id": b.payment.transaction_id,
+                "razorpay_payment_id": getattr(b.payment, "razorpay_payment_id", None)
             } if b.payment else None
         }
 

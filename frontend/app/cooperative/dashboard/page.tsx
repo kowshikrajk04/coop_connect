@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { 
   Building2, Users, CheckCircle2, UserCheck, Scale, 
   HeartHandshake, TrendingUp, Settings, ArrowRight, 
-  DollarSign, Briefcase, AlertTriangle, ShieldCheck
+  DollarSign, Briefcase, AlertTriangle, ShieldCheck, Trophy, Star
 } from "lucide-react";
 import { api, getUserRole } from "@/lib/api";
 
@@ -49,13 +49,27 @@ export default function CooperativeDashboard() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/cooperative/membership-requests"
+            className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs shadow-xs transition flex items-center gap-2"
+          >
+            <Users className="w-4 h-4" />
+            <span>Membership Requests ({stats?.pending_membership_requests || 0})</span>
+          </Link>
           <Link
             href="/cooperative/verification"
             className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-xs transition flex items-center gap-2"
           >
             <UserCheck className="w-4 h-4" />
             <span>Verify Workers ({stats?.pending_verifications || 0})</span>
+          </Link>
+          <Link
+            href="/leaderboard"
+            className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs shadow-xs transition flex items-center gap-2"
+          >
+            <Trophy className="w-4 h-4" />
+            <span>Worker Performance</span>
           </Link>
         </div>
       </div>
@@ -75,15 +89,15 @@ export default function CooperativeDashboard() {
         </div>
 
         <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-2xs">
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Pending Review</span>
-          <p className="text-2xl font-black text-amber-600 mt-1">{stats?.pending_verifications || 0}</p>
-          <span className="text-[11px] text-amber-700 mt-1 block">Awaiting board check</span>
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Pending Requests</span>
+          <p className="text-2xl font-black text-purple-600 mt-1">{stats?.pending_membership_requests || 0}</p>
+          <span className="text-[11px] text-purple-700 mt-1 block">Membership joins</span>
         </div>
 
         <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-2xs">
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Total Bookings</span>
-          <p className="text-2xl font-black text-gray-900 mt-1">{stats?.total_bookings || 0}</p>
-          <span className="text-[11px] text-gray-400 mt-1 block">Requests processed</span>
+          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block">Skill Reviews</span>
+          <p className="text-2xl font-black text-amber-600 mt-1">{stats?.pending_verifications || 0}</p>
+          <span className="text-[11px] text-amber-700 mt-1 block">Awaiting board check</span>
         </div>
 
         <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-2xs">
@@ -102,7 +116,7 @@ export default function CooperativeDashboard() {
       {/* Primary Management Hub Cards */}
       <div>
         <h2 className="text-lg font-bold text-gray-900 mb-4">Cooperative Operations</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
           {/* Card 1: Worker Verification */}
           <Link
             href="/cooperative/verification"
@@ -180,6 +194,26 @@ export default function CooperativeDashboard() {
             <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs font-semibold text-purple-700">
               <span>ML Predictive Model</span>
               <span>Analyze →</span>
+            </div>
+          </Link>
+
+          {/* Card 5: Worker Performance Leaderboard */}
+          <Link
+            href="/leaderboard"
+            className="group bg-white border border-gray-200 hover:border-amber-400 rounded-2xl p-6 shadow-2xs hover:shadow-xs transition flex flex-col justify-between"
+          >
+            <div>
+              <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-4 group-hover:scale-105 transition">
+                <Trophy className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-gray-900">Worker Performance</h3>
+              <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                Review verified craftsmanship rankings, star ratings, reliability scores, and customer reviews.
+              </p>
+            </div>
+            <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs font-semibold text-amber-600">
+              <span>Quality Index</span>
+              <span>View Standings →</span>
             </div>
           </Link>
         </div>

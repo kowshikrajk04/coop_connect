@@ -47,8 +47,9 @@ export function clearAuthData() {
 
 async function request(endpoint: string, options: RequestInit = {}) {
   const token = getToken();
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...(options.headers as Record<string, string>),
   };
 
@@ -64,7 +65,11 @@ async function request(endpoint: string, options: RequestInit = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.detail || data.message || "An unexpected error occurred");
+    throw new Error(
+      data.detail ||
+      data.message ||
+      (response.statusText ? `Request failed (${response.status}: ${response.statusText})` : "Network request failed. Please check connection.")
+    );
   }
 
   return data;
@@ -77,21 +82,31 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ login_id, password }),
       }),
-    register: (payload: any) =>
-      request("/api/auth/register", {
+    register: (payload: any) => {
+      const isFormData = typeof FormData !== "undefined" && payload instanceof FormData;
+      return request("/api/auth/register", {
         method: "POST",
-        body: JSON.stringify(payload),
-      }),
-    sendOtp: (mobile: string) =>
-      request("/api/auth/send-otp", {
+        body: isFormData ? payload : JSON.stringify(payload),
+      });
+    },
+    sendOtp: (target: string | { email?: string; mobile?: string }) => {
+      const body = typeof target === "string"
+        ? (target.includes("@") ? { email: target } : { mobile: target, email: target })
+        : target;
+      return request("/api/auth/send-otp", {
         method: "POST",
-        body: JSON.stringify({ mobile }),
-      }),
-    verifyOtp: (mobile: string, otp: string) =>
-      request("/api/auth/verify-otp", {
+        body: JSON.stringify(body),
+      });
+    },
+    verifyOtp: (target: string | { email?: string; mobile?: string }, otp: string) => {
+      const body = typeof target === "string"
+        ? (target.includes("@") ? { email: target, otp } : { mobile: target, otp })
+        : { ...target, otp };
+      return request("/api/auth/verify-otp", {
         method: "POST",
-        body: JSON.stringify({ mobile, otp }),
-      }),
+        body: JSON.stringify(body),
+      });
+    },
     me: () => request("/api/auth/me"),
   },
   customer: {
@@ -110,11 +125,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ skills }),
       }),
-    updateDocs: (docs: any) =>
-      request("/api/worker/documents", {
+    updateDocs: (docs: any) => {
+      const isFormData = typeof FormData !== "undefined" && docs instanceof FormData;
+      return request("/api/worker/documents", {
         method: "POST",
-        body: JSON.stringify(docs),
-      }),
+        body: isFormData ? docs : JSON.stringify(docs),
+      });
+    },
     getAssessmentQuestions: (skill: string, lang: string = "en") =>
       request(`/api/worker/assessment/questions?skill=${encodeURIComponent(skill)}&lang=${lang}`),
     evaluateAnswer: (payload: any) =>
@@ -187,6 +204,21 @@ export const api = {
   payments: {
     getBreakdown: (bookingId: number) =>
       request(`/api/payments/breakdown/${bookingId}`),
+    createOrder: (bookingId: number, amount?: number) =>
+      request("/api/payments/create-order", {
+        method: "POST",
+        body: JSON.stringify({ booking_id: bookingId, amount }),
+      }),
+    verifyPayment: (payload: {
+      razorpay_order_id: string;
+      razorpay_payment_id: string;
+      razorpay_signature: string;
+      booking_id: number;
+    }) =>
+      request("/api/payments/verify", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
     pay: (bookingId: number, method: string = "UPI") =>
       request("/api/payments/pay", {
         method: "POST",
@@ -195,10 +227,32 @@ export const api = {
     getInvoice: (bookingId: number) =>
       request(`/api/payments/invoice/${bookingId}`),
     submitRating: (bookingId: number, stars: number, feedback?: string) =>
-      request("/api/payments/rating", {
+      request("/api/feedback", {
         method: "POST",
-        body: JSON.stringify({ booking_id: bookingId, stars, feedback }),
+        body: JSON.stringify({ booking_id: bookingId, rating: stars, feedback }),
       }),
+  },
+  feedback: {
+    submit: (bookingId: number, rating: number, feedback?: string) =>
+      request("/api/feedback", {
+        method: "POST",
+        body: JSON.stringify({ booking_id: bookingId, rating, feedback }),
+      }),
+    getWorkerFeedback: (workerId: number, page: number = 1, pageSize: number = 20) =>
+      request(`/api/workers/${workerId}/feedback?page=${page}&page_size=${pageSize}`),
+    getWorkerPerformance: (workerId: number) =>
+      request(`/api/workers/${workerId}/performance`),
+  },
+  leaderboard: {
+    get: (params?: { trade?: string; cooperative_id?: number; time_period?: string; limit?: number }) => {
+      const q = new URLSearchParams();
+      if (params?.trade && params.trade !== "ALL") q.append("trade", params.trade);
+      if (params?.cooperative_id) q.append("cooperative_id", String(params.cooperative_id));
+      if (params?.time_period) q.append("time_period", params.time_period);
+      if (params?.limit) q.append("limit", String(params.limit));
+      const qs = q.toString();
+      return request(`/api/leaderboard${qs ? `?${qs}` : ""}`);
+    },
   },
   demandForecast: {
     getForecast: () => request("/api/demand-forecast"),
@@ -207,6 +261,26 @@ export const api = {
     getAll: () => request("/api/notifications"),
     markRead: (id: number) =>
       request(`/api/notifications/${id}/read`, { method: "POST" }),
+  },
+  memberships: {
+    getCooperatives: () => request("/api/memberships/cooperatives"),
+    requestJoin: (payload: { cooperative_id: number; membership_type?: string; notes?: string }) =>
+      request("/api/memberships/request", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    getMyStatus: () => request("/api/memberships/my-status"),
+    getCooperativeRequests: (status: string = "ALL") =>
+      request(`/api/memberships/cooperative-requests?status_filter=${status}`),
+    approve: (requestId: number) =>
+      request(`/api/memberships/requests/${requestId}/approve`, {
+        method: "POST",
+      }),
+    reject: (requestId: number, reason?: string) =>
+      request(`/api/memberships/requests/${requestId}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }),
   },
   demo: {
     seed: () => request("/api/demo/seed", { method: "POST" }),

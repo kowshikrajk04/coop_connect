@@ -9,6 +9,7 @@ import {
   Sparkles, Square, Check, ArrowLeft
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { getTradeAssessmentQuestions, evaluateAssessmentAnswer } from "@/lib/assessmentData";
 
 const TRADES = [
   "Plumber", "Electrician", "Carpenter", "Painter", 
@@ -31,10 +32,14 @@ interface QuestionItem {
   id: string;
   q_no: number;
   question: string;
+  question_en?: string;
+  question_ta?: string;
   options?: string[];
   correct_index?: number;
   explanation?: string;
   voice_prompt?: string;
+  voice_prompt_en?: string;
+  voice_prompt_ta?: string;
   key_concepts?: string[];
 }
 
@@ -140,37 +145,81 @@ function AssessmentContent() {
     };
   }, []);
 
-  // Voice finder: Finds best matching system voice for language
-  const findBestVoice = (langCode: string, voiceList: SpeechSynthesisVoice[]) => {
-    const list = voiceList.length > 0 ? voiceList : (typeof window !== "undefined" && "speechSynthesis" in window ? window.speechSynthesis.getVoices() : []);
-    if (!list || list.length === 0) return null;
+  // Voice finder: Finds best matching system voice for language, with graceful fallback
+  // Requirement: "Prefer Tamil voice if a Tamil voice is available; otherwise gracefully fall back to an available voice."
+  interface ResolvedVoiceInfo {
+    voice: SpeechSynthesisVoice | null;
+    lang: string;
+    isNative: boolean;
+  }
+
+  const resolveVoice = (
+    langCode: string,
+    voiceList: SpeechSynthesisVoice[]
+  ): ResolvedVoiceInfo => {
+    const list =
+      voiceList && voiceList.length > 0
+        ? voiceList
+        : typeof window !== "undefined" && "speechSynthesis" in window
+        ? window.speechSynthesis.getVoices()
+        : [];
+
+    if (!list || list.length === 0) {
+      const target = LANGUAGES.find((l) => l.code === langCode);
+      return {
+        voice: null,
+        lang: target ? target.speechCode : (langCode === "ta" ? "ta-IN" : "en-IN"),
+        isNative: false,
+      };
+    }
 
     const target = LANGUAGES.find((l) => l.code === langCode);
     const speechCode = (target?.speechCode || "ta-IN").toLowerCase().replace("_", "-");
     const shortCode = langCode.toLowerCase();
 
-    // 1. Exact match (e.g. ta-IN)
+    // 1. Exact match (e.g. ta-IN, hi-IN)
     let found = list.find((v) => v.lang.toLowerCase().replace("_", "-") === speechCode);
-    if (found) return found;
+    if (found) return { voice: found, lang: found.lang, isNative: true };
 
     // 2. Starts with speechCode (e.g. ta-in-*)
     found = list.find((v) => v.lang.toLowerCase().replace("_", "-").startsWith(speechCode));
-    if (found) return found;
+    if (found) return { voice: found, lang: found.lang, isNative: true };
 
     // 3. Starts with short language code (e.g. ta)
     found = list.find((v) => v.lang.toLowerCase().startsWith(shortCode));
-    if (found) return found;
+    if (found) return { voice: found, lang: found.lang, isNative: true };
 
     // 4. Name contains language name (e.g. "Tamil", "தமிழ்", "Valluvar")
     if (target) {
-      found = list.find((v) => 
-        v.name.toLowerCase().includes(target.label.toLowerCase()) ||
-        v.name.toLowerCase().includes(target.native.toLowerCase())
-      );
-      if (found) return found;
+      found = list.find((v) => {
+        const vName = v.name.toLowerCase();
+        return (
+          vName.includes(target.label.toLowerCase()) ||
+          vName.includes(target.native.toLowerCase()) ||
+          (langCode === "ta" && (vName.includes("tamil") || vName.includes("valluvar")))
+        );
+      });
+      if (found) return { voice: found, lang: found.lang, isNative: true };
     }
 
-    return null;
+    // 5. Graceful Fallback if native voice is not installed on OS:
+    // Try Indian English first
+    let fallback = list.find((v) => {
+      const l = v.lang.toLowerCase().replace("_", "-");
+      return l.includes("en-in") || v.name.toLowerCase().includes("india");
+    });
+    if (fallback) return { voice: fallback, lang: fallback.lang, isNative: false };
+
+    // Try default voice
+    fallback = list.find((v) => v.default);
+    if (fallback) return { voice: fallback, lang: fallback.lang, isNative: false };
+
+    // Try any English voice
+    fallback = list.find((v) => v.lang.toLowerCase().startsWith("en"));
+    if (fallback) return { voice: fallback, lang: fallback.lang, isNative: false };
+
+    // Fall back to first available voice in system
+    return { voice: list[0], lang: list[0].lang, isNative: false };
   };
 
   // Stop any active audio or speech
@@ -191,96 +240,28 @@ function AssessmentContent() {
   };
 
   // =========================================================================
-  // 2. DUAL-ENGINE speakQuestion(question, language, callbacks)
-  // 1st Priority: Server Neural MP3 Stream (/api/assessment/tts) via HTML5 Audio
-  //   - Crystal-clear, native, natural Tamil (PallaviNeural) & English (NeerjaNeural)
-  //   - Works 100% reliably on Windows/Edge/Chrome even with ZERO local language packs!
-  // 2nd Priority: Local window.speechSynthesis fallback if offline or stream blocked
+  // 2. BROWSER-NATIVE speakQuestion
+  // - Uses window.speechSynthesis & SpeechSynthesisUtterance directly
+  // - Triggered from user interaction to satisfy browser autoplay restrictions
+  // - Cancels previous speech before starting a new utterance
+  // - Sets appropriate language, rate (0.95), pitch (1.0), volume (1.0)
+  // - Gracefully falls back if native voice unavailable so sound is audible
+  // - Handles asynchronous voice loading
   // =========================================================================
   const speakQuestion = (
-    question: string,
+    text: string,
     langCode: string = language,
     callbacks?: {
       onStart?: () => void;
       onEnd?: () => void;
       onError?: (err: any) => void;
-    }
+    },
+    fallbackText?: string
   ) => {
     stopAllAudio();
     setIsSpeaking(true);
     if (callbacks?.onStart) callbacks.onStart();
 
-    let hasEnded = false;
-    const finish = () => {
-      if (hasEnded) return;
-      hasEnded = true;
-      setIsSpeaking(false);
-      activeAudioRef.current = null;
-      if (callbacks?.onEnd) callbacks.onEnd();
-    };
-
-    // Primary Engine: Neural Streaming Audio
-    try {
-      const cleanLang = (langCode || "ta").toLowerCase().slice(0, 2);
-      const streamUrl = `/api/assessment/tts?text=${encodeURIComponent(question)}&lang=${cleanLang}`;
-      const audio = new Audio(streamUrl);
-      activeAudioRef.current = audio;
-
-      audio.onplay = () => {
-        setIsSpeaking(true);
-        if (callbacks?.onStart) callbacks.onStart();
-      };
-
-      audio.onended = () => {
-        finish();
-      };
-
-      audio.onerror = (err) => {
-        console.warn("Neural audio stream error, falling back to Web Speech:", err);
-        fallbackWebSpeech(question, langCode, {
-          onStart: callbacks?.onStart,
-          onEnd: callbacks?.onEnd,
-          onError: callbacks?.onError
-        });
-      };
-
-      // Watchdog safety timer
-      const maxDuration = Math.min(15000, Math.max(3000, question.length * 90));
-      const watchdog = setTimeout(() => {
-        if (!hasEnded) {
-          finish();
-        }
-      }, maxDuration);
-
-      audio.addEventListener("ended", () => clearTimeout(watchdog), { once: true });
-
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          console.warn("Audio.play() error or policy block, falling back to Web Speech:", err);
-          clearTimeout(watchdog);
-          fallbackWebSpeech(question, langCode, {
-            onStart: callbacks?.onStart,
-            onEnd: callbacks?.onEnd,
-            onError: callbacks?.onError
-          });
-        });
-      }
-    } catch (err) {
-      fallbackWebSpeech(question, langCode, callbacks);
-    }
-  };
-
-  // Fallback: Native Browser Web Speech API
-  const fallbackWebSpeech = (
-    text: string,
-    langCode: string,
-    callbacks?: {
-      onStart?: () => void;
-      onEnd?: () => void;
-      onError?: (err: any) => void;
-    }
-  ) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
       setIsSpeaking(false);
       if (callbacks?.onEnd) callbacks.onEnd();
@@ -288,30 +269,45 @@ function AssessmentContent() {
     }
 
     try {
+      // 1. Cancel previous speech immediately
       window.speechSynthesis.cancel();
-      if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
 
-      const utterance = new SpeechSynthesisUtterance(text);
+      // 2. Resolve available voices dynamically
+      const currentVoices = window.speechSynthesis.getVoices();
+      const list = (currentVoices && currentVoices.length > 0) ? currentVoices : voices;
+      const resolved = resolveVoice(langCode, list);
+
+      // 3. Fallback text handling for English-only OS voices
+      // If native voice is not installed on OS, English voices cannot pronounce
+      // Tamil Unicode characters (they emit silence/0-bytes). Use fallback text
+      // so audible sound is reliably produced.
+      const textToSpeak = (resolved.isNative || !fallbackText) ? text : fallbackText;
+
+      const utterance = new SpeechSynthesisUtterance(textToSpeak);
+
+      // Prevent Chrome GC bug by retaining active references
       activeUtteranceRef.current = utterance;
       (window as any).__activeUtterance = utterance;
 
-      const target = LANGUAGES.find((l) => l.code === langCode);
-      utterance.lang = target ? target.speechCode : "ta-IN";
-
-      const matchedVoice = findBestVoice(langCode, voices);
-      if (matchedVoice) {
-        utterance.voice = matchedVoice;
-        utterance.lang = matchedVoice.lang;
+      if (resolved.voice) {
+        utterance.voice = resolved.voice;
+        utterance.lang = resolved.lang;
+      } else {
+        const target = LANGUAGES.find((l) => l.code === langCode);
+        utterance.lang = target ? target.speechCode : (langCode === "ta" ? "ta-IN" : "en-IN");
       }
 
-      utterance.rate = 0.90;
+      utterance.rate = 0.95;
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
 
-      let hasDone = false;
-      const done = () => {
-        if (hasDone) return;
-        hasDone = true;
+      let hasEnded = false;
+      const finish = () => {
+        if (hasEnded) return;
+        hasEnded = true;
         setIsSpeaking(false);
         activeUtteranceRef.current = null;
         if (callbacks?.onEnd) callbacks.onEnd();
@@ -321,51 +317,111 @@ function AssessmentContent() {
         setIsSpeaking(true);
         if (callbacks?.onStart) callbacks.onStart();
       };
-      utterance.onend = done;
-      utterance.onerror = done;
 
-      // Watchdog timeout
-      const safetyTime = Math.min(12000, Math.max(3000, text.length * 80));
-      setTimeout(done, safetyTime);
+      utterance.onend = () => {
+        finish();
+      };
 
-      window.speechSynthesis.speak(utterance);
-    } catch (e) {
+      utterance.onerror = (e) => {
+        if (e.error !== "canceled" && e.error !== "interrupted") {
+          console.warn("SpeechSynthesis notice:", e);
+          if (callbacks?.onError) callbacks.onError(e);
+        }
+        finish();
+      };
+
+      // Watchdog safety timer
+      const maxDuration = Math.min(20000, Math.max(3000, textToSpeak.length * 90));
+      const watchdog = setTimeout(() => {
+        if (!hasEnded) {
+          finish();
+        }
+      }, maxDuration);
+
+      utterance.addEventListener("end", () => clearTimeout(watchdog), { once: true });
+      utterance.addEventListener("error", () => clearTimeout(watchdog), { once: true });
+
+      // Small 25ms timeout allows Chrome's speech synthesis engine to clear cancelled utterances
+      setTimeout(() => {
+        try {
+          if (window.speechSynthesis.paused) {
+            window.speechSynthesis.resume();
+          }
+          window.speechSynthesis.speak(utterance);
+        } catch (err) {
+          console.warn("SpeechSynthesis.speak notice:", err);
+          finish();
+        }
+      }, 25);
+    } catch (err) {
+      console.warn("SpeechSynthesis error:", err);
       setIsSpeaking(false);
       if (callbacks?.onEnd) callbacks.onEnd();
     }
   };
 
   // Test Voice Handler on Language Selection Screen
+  // Directly invoked from user click so browser autoplay policies are fully satisfied
   const handleTestVoice = () => {
-    const testMessages: Record<string, string> = {
+    stopAllAudio();
+    setIsTestingVoice(true);
+    setTestVoiceSuccess(null);
+    setMicError(null);
+
+    // Direct user-click gesture activation
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+    }
+
+    const nativeMessages: Record<string, string> = {
       ta: "வணக்கம். இது உங்கள் திறன் மதிப்பீடு. முதல் கேள்விக்கு தயாராகுங்கள்.",
-      en: "Hello. This is your skill assessment.",
+      en: "Hello. This is your skill assessment. Get ready for the first question.",
       hi: "नमस्ते। यह आपका कौशल मूल्यांकन है। पहले प्रश्न के लिए तैयार हो जाइए।",
-      te: "నమస్కారం. ఇది మీ నైபுణ్య అంచనా. మొదటి ప్రశ్నకు సిద్ధంగా ఉండండి.",
-      kn: "ನಮಸ್ಕಾರ. இது உங்கள் திறன் மதிப்பீடு. ಮೊದಲ ಪ್ರಶ್ನೆಗೆ ಸಿದ್ಧರಾಗಿ.",
+      te: "నమస్కారం. ఇది మీ నైపుణ్య అంచనా. మొదటి ప్రశ్నకు సిద్ధంగా ఉండండి.",
+      kn: "ನಮಸ್ಕಾರ. ಇದು உங்கள் திறன் மதிப்பீடு. முதல் கேள்விக்கு சಿದ್ಧರಾಗಿ.",
       ml: "നമസ്കാരം. ഇത് നിങ്ങളുടെ நைபுண்ய மதிப்பீடு. முதல் கேள்விக்கு தயாராகுங்கள்.",
-      bn: "নমস্কার। এটি আপনার দক্ষতা মূল্যায়ন। প্রথম প্রশ্নের জন্য প্রস্তুত হন।",
+      bn: "নমস্কার। এটি আপনার दक्षता মূল্যায়ন। প্রথম প্রশ্নের জন্য প্রস্তুত হন।",
       mr: "नमस्कार. हे आपले कौशल्य मूल्यांकन आहे. पहिल्या प्रश्नासाठी सज्ज व्हा."
     };
 
-    const textToSpeak = testMessages[language] || testMessages["en"];
-    setIsTestingVoice(true);
-    setTestVoiceSuccess(null);
+    const fallbackMessages: Record<string, string> = {
+      ta: "Vanakkam. This is your CoopConnect worker skill assessment. Voice test successful.",
+      en: "Hello. This is your skill assessment. Voice test successful.",
+      hi: "Namaste. This is your skill assessment. Voice test successful.",
+      te: "Namaskaram. This is your skill assessment. Voice test successful.",
+      kn: "Namaskara. This is your skill assessment. Voice test successful.",
+      ml: "Namaskaram. This is your skill assessment. Voice test successful.",
+      bn: "Nomoshkar. This is your skill assessment. Voice test successful.",
+      mr: "Namaskar. This is your skill assessment. Voice test successful."
+    };
 
-    speakQuestion(textToSpeak, language, {
-      onStart: () => {
-        setIsTestingVoice(true);
+    const textNative = nativeMessages[language] || nativeMessages["en"];
+    const textFallback = fallbackMessages[language] || fallbackMessages["en"];
+
+    speakQuestion(
+      textNative,
+      language,
+      {
+        onStart: () => {
+          setIsTestingVoice(true);
+        },
+        onEnd: () => {
+          setIsTestingVoice(false);
+          setTestVoiceSuccess(true);
+        },
+        onError: (err) => {
+          console.warn("Test voice notice:", err);
+          setIsTestingVoice(false);
+          if (err?.error !== "canceled" && err?.error !== "interrupted") {
+            setTestVoiceSuccess(false);
+          }
+        }
       },
-      onEnd: () => {
-        setIsTestingVoice(false);
-        setTestVoiceSuccess(true);
-      },
-      onError: (err) => {
-        console.warn("Test voice error:", err);
-        setIsTestingVoice(false);
-        setTestVoiceSuccess(false);
-      }
-    });
+      textFallback
+    );
   };
 
   // 3. Speech-to-Text (STT)
@@ -481,13 +537,7 @@ function AssessmentContent() {
 
   // 4. Start Assessment Flow (Triggered by user clicking START ASSESSMENT)
   const handleStartTest = async () => {
-    // Unlock browser audio context in user gesture
-    if (typeof Audio !== "undefined") {
-      try {
-        const silentAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
-        silentAudio.play().catch(() => {});
-      } catch (e) {}
-    }
+    // Resume browser audio in user gesture
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try {
         window.speechSynthesis.resume();
@@ -498,27 +548,53 @@ function AssessmentContent() {
     setTamilVoiceWarning(false);
     setMicError(null);
 
+    let list: QuestionItem[] = [];
+
+    // 1. Try fetching questions from API
     try {
       const res = await api.assessment.getQuestions(selectedTrade, language);
-      const list: QuestionItem[] = res.questions || [];
-      if (list.length === 0) {
-        alert("Failed to load questions for " + selectedTrade);
-        return;
+      if (res && res.questions && Array.isArray(res.questions) && res.questions.length >= 10) {
+        list = res.questions;
       }
+    } catch (e: any) {
+      console.warn("API questions fetch notice, using built-in question bank:", e);
+    }
 
-      setQuestions(list);
-      setCurrentIndex(0);
-      setAnswersDossier({});
-      setCurrentEvaluation(null);
-      setCurrentTranscript("");
-      lastSpokenQIndexRef.current = 0;
-      setStep("ASSESSMENT");
-      setVoiceStatus("AI_SPEAKING");
+    // 2. Seamless local fallback if API fails or on Vercel
+    if (!list || list.length === 0) {
+      list = getTradeAssessmentQuestions(selectedTrade, language);
+    }
 
-      // Auto-speak Question 1 out loud immediately upon starting
-      const q1 = list[0];
-      setTimeout(() => {
-        speakQuestion(q1.question, language, {
+    // 3. Validate questions
+    if (!list || list.length === 0) {
+      setMicError(
+        language === "ta"
+          ? "கேள்விகளை ஏற்றுவதில் சிக்கல் ஏற்பட்டது. தயவுசெய்து பக்கத்தை புதுப்பிக்கவும்."
+          : "Could not load questions. Please refresh the page."
+      );
+      setIsLoadingQuestions(false);
+      return;
+    }
+
+    setQuestions(list);
+    setCurrentIndex(0);
+    setAnswersDossier({});
+    setCurrentEvaluation(null);
+    setCurrentTranscript("");
+    lastSpokenQIndexRef.current = 0;
+    setStep("ASSESSMENT");
+    setVoiceStatus("AI_SPEAKING");
+    setIsLoadingQuestions(false);
+
+    // Auto-speak Question 1 out loud immediately upon starting
+    const q1 = list[0];
+    const q1Native = q1.voice_prompt || q1.question;
+    const q1Fallback = q1.voice_prompt_en || q1.question_en || q1.question;
+    setTimeout(() => {
+      speakQuestion(
+        q1Native,
+        language,
+        {
           onStart: () => {
             setVoiceStatus("AI_SPEAKING");
           },
@@ -528,13 +604,10 @@ function AssessmentContent() {
           onError: () => {
             setVoiceStatus("YOUR_TURN");
           }
-        });
-      }, 200);
-    } catch (e: any) {
-      alert(e.message || "Failed to load questions. Please check connection.");
-    } finally {
-      setIsLoadingQuestions(false);
-    }
+        },
+        q1Fallback
+      );
+    }, 150);
   };
 
   // Current Active Question
@@ -547,17 +620,24 @@ function AssessmentContent() {
       stopListening();
     }
     setVoiceStatus("AI_SPEAKING");
-    speakQuestion(currentQ.question, language, {
-      onStart: () => {
-        setVoiceStatus("AI_SPEAKING");
+    const qNative = currentQ.voice_prompt || currentQ.question;
+    const qFallback = currentQ.voice_prompt_en || currentQ.question_en || currentQ.question;
+    speakQuestion(
+      qNative,
+      language,
+      {
+        onStart: () => {
+          setVoiceStatus("AI_SPEAKING");
+        },
+        onEnd: () => {
+          setVoiceStatus("YOUR_TURN");
+        },
+        onError: () => {
+          setVoiceStatus("YOUR_TURN");
+        }
       },
-      onEnd: () => {
-        setVoiceStatus("YOUR_TURN");
-      },
-      onError: () => {
-        setVoiceStatus("YOUR_TURN");
-      }
-    });
+      qFallback
+    );
   };
 
   // 6. Record Again (Clears current transcript and restarts microphone)
@@ -573,17 +653,20 @@ function AssessmentContent() {
 
     const answerToEval = currentTranscript.trim();
     if (!answerToEval) {
-      alert(
+      setMicError(
         language === "ta" 
-          ? "தயவுசெய்து 'பதிலளிக்க பேசவும்' அழுத்தி உங்கள் பதிலை குரல் மூலம் கூறவும்." 
-          : "Please tap Answer and speak your response."
+          ? "தயவுசெய்து உங்கள் பதிலை பேசவும் அல்லது கீழே உள்ள கட்டத்தில் தட்டச்சு செய்யவும்." 
+          : "Please speak your answer or type it in the text area below."
       );
       return;
     }
 
     setVoiceStatus("EVALUATING");
+    setMicError(null);
+
+    let evalRes: EvaluationResult | null = null;
     try {
-      const evalRes: EvaluationResult = await api.assessment.evaluate({
+      evalRes = await api.assessment.evaluate({
         skill: selectedTrade,
         question: currentQ.question,
         selected_language: language,
@@ -591,39 +674,51 @@ function AssessmentContent() {
         question_id: currentQ.id,
         question_number: currentIndex + 1
       });
-
-      setCurrentEvaluation(evalRes);
-      setVoiceStatus("EVALUATED");
-
-      // Save into answer dossier
-      setAnswersDossier((prev) => ({
-        ...prev,
-        [currentIndex + 1]: {
-          question_id: currentQ.id,
-          question_number: currentIndex + 1,
-          question: currentQ.question,
-          transcribed_answer: answerToEval,
-          score: evalRes.score,
-          AI_feedback: evalRes.feedback,
-          correctness: evalRes.correctness,
-          safety_awareness: evalRes.safety_awareness
-        }
-      }));
-
-      // Speak feedback aloud in the worker's selected language
-      const spokenFeedback = language === "ta"
-        ? `மதிப்பீடு: பத்து மதிப்பெண்களுக்கு ${evalRes.score} மதிப்பெண்கள். ${evalRes.feedback}`
-        : `Evaluation: ${evalRes.score} out of 10 points. ${evalRes.feedback}`;
-      
-      speakQuestion(spokenFeedback, language);
     } catch (err: any) {
-      alert(err.message || "Failed to evaluate answer.");
-      setVoiceStatus(currentTranscript ? "ANSWER_DETECTED" : "YOUR_TURN");
+      console.warn("API evaluate notice, evaluating locally:", err);
     }
+
+    // Local evaluation fallback if API fails or on Vercel
+    if (!evalRes || typeof evalRes.score !== "number") {
+      evalRes = evaluateAssessmentAnswer(
+        selectedTrade,
+        currentQ.id,
+        currentQ.question,
+        language,
+        answerToEval
+      );
+    }
+
+    setCurrentEvaluation(evalRes);
+    setVoiceStatus("EVALUATED");
+
+    // Save into answer dossier
+    setAnswersDossier((prev) => ({
+      ...prev,
+      [currentIndex + 1]: {
+        question_id: currentQ.id,
+        question_number: currentIndex + 1,
+        question: currentQ.question,
+        transcribed_answer: answerToEval,
+        score: evalRes!.score,
+        AI_feedback: evalRes!.feedback,
+        correctness: evalRes!.correctness,
+        safety_awareness: evalRes!.safety_awareness
+      }
+    }));
+
+    // Speak feedback aloud in the worker's selected language
+    const spokenFeedback = language === "ta"
+      ? `மதிப்பீடு: பத்து மதிப்பெண்களுக்கு ${evalRes.score} மதிப்பெண்கள். ${evalRes.feedback}`
+      : `Evaluation: ${evalRes.score} out of 10 points. ${evalRes.feedback}`;
+    const fallbackFeedback = `Evaluation score: ${evalRes.score} out of 10. ${evalRes.correctness}.`;
+    
+    speakQuestion(spokenFeedback, language, undefined, fallbackFeedback);
   };
 
   // 8. Next Question or Final Results
   const handleNextQuestion = async () => {
+    stopListening();
     stopAllAudio();
 
     if (currentIndex < questions.length - 1) {
@@ -636,19 +731,26 @@ function AssessmentContent() {
       lastSpokenQIndexRef.current = nextIdx;
 
       const nextQ = questions[nextIdx];
+      const nextQNative = nextQ.voice_prompt || nextQ.question;
+      const nextQFallback = nextQ.voice_prompt_en || nextQ.question_en || nextQ.question;
       setTimeout(() => {
-        speakQuestion(nextQ.question, language, {
-          onStart: () => {
-            setVoiceStatus("AI_SPEAKING");
+        speakQuestion(
+          nextQNative,
+          language,
+          {
+            onStart: () => {
+              setVoiceStatus("AI_SPEAKING");
+            },
+            onEnd: () => {
+              setVoiceStatus("YOUR_TURN");
+            },
+            onError: () => {
+              setVoiceStatus("YOUR_TURN");
+            }
           },
-          onEnd: () => {
-            setVoiceStatus("YOUR_TURN");
-          },
-          onError: () => {
-            setVoiceStatus("YOUR_TURN");
-          }
-        });
-      }, 250);
+          nextQFallback
+        );
+      }, 200);
     } else {
       // All 10 questions finished -> Calculate and Submit Final Dossier
       await handleFinalizeAssessment();
@@ -683,18 +785,22 @@ function AssessmentContent() {
         .map((d) => `Q${d.question_number}: "${d.transcribed_answer}" (Score: ${d.score}/10)`)
         .join(" | ");
 
-      // Submit to backend
-      await api.assessment.submit({
-        skill: selectedTrade,
-        preferred_language: language,
-        total_score: calcResult.total,
-        average_score: calcResult.average,
-        percentage: calcResult.percentage,
-        passed: isPassed,
-        transcribed_answers: allDossierItems,
-        all_transcripts: allTranscriptsText,
-        evaluation_summary: `${selectedTrade} AI Voice Assessment (${language.toUpperCase()}). Score: ${pct}%. Status: PENDING_APPROVAL.`
-      });
+      // Submit to backend if available
+      try {
+        await api.assessment.submit({
+          skill: selectedTrade,
+          preferred_language: language,
+          total_score: calcResult.total,
+          average_score: calcResult.average,
+          percentage: calcResult.percentage,
+          passed: isPassed,
+          transcribed_answers: allDossierItems,
+          all_transcripts: allTranscriptsText,
+          evaluation_summary: `${selectedTrade} AI Voice Assessment (${language.toUpperCase()}). Score: ${pct}%. Status: PENDING_APPROVAL.`
+        });
+      } catch (subErr) {
+        console.warn("Backend submit notice:", subErr);
+      }
 
       setStep("RESULTS");
 
@@ -707,10 +813,14 @@ function AssessmentContent() {
           : isPassed
             ? `Congratulations! You scored ${pct} percent and passed the practical assessment. Your dossier is now pending cooperative board review.`
             : `Your score is ${pct} percent. A minimum of 60 percent is required. Please re-attempt.`;
-        speakQuestion(finalAudio, language);
-      }, 400);
+        const fallbackAudio = isPassed
+          ? `Congratulations! You scored ${pct} percent and passed the skill assessment. Your profile is submitted for cooperative board verification.`
+          : `Your score is ${pct} percent. Minimum 60 percent is required. Please re-attempt.`;
+        speakQuestion(finalAudio, language, undefined, fallbackAudio);
+      }, 300);
     } catch (e: any) {
-      alert(e.message || "Failed to save final assessment result.");
+      console.warn("Finalize assessment notice:", e);
+      setStep("RESULTS");
     } finally {
       setIsSubmittingFinal(false);
     }
@@ -971,10 +1081,12 @@ function AssessmentContent() {
 
             {/* Browser Unsupported STT Warning */}
             {!isSupported && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
                 <span>
-                  Voice assessment is not supported in this browser. Please use Google Chrome on a supported device.
+                  {language === "ta"
+                    ? "குரல் அறிதல் இந்த உலாவியில் ஆதரிக்கப்படவில்லை. Google Chrome உலாவியைப் பயன்படுத்தவும் அல்லது கீழே உங்கள் பதிலை நேரடியாக தட்டச்சு செய்யவும்."
+                    : "Voice input is not available in this browser. Please use Chrome or type your answer manually."}
                 </span>
               </div>
             )}

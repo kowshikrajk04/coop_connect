@@ -19,6 +19,7 @@ class UserRegister(BaseModel):
     # Cooperative optional fields
     registration_number: Optional[str] = None
     contact_person: Optional[str] = None
+    document_url: Optional[str] = None
     # Worker optional fields
     dob: Optional[str] = None
 
@@ -27,11 +28,18 @@ class UserLogin(BaseModel):
     password: str
 
 class OTPRequest(BaseModel):
-    mobile: str
+    email: Optional[str] = None
+    mobile: Optional[str] = None
 
 class OTPVerify(BaseModel):
-    mobile: str
+    email: Optional[str] = None
+    mobile: Optional[str] = None
     otp: str
+
+class OTPResponse(BaseModel):
+    success: bool
+    message: str
+
 
 class UserOut(BaseModel):
     id: int
@@ -234,7 +242,31 @@ class PaymentBreakdown(BaseModel):
 
 class PaymentSubmit(BaseModel):
     booking_id: int
-    payment_method: str = "UPI"  # UPI, ONLINE
+    payment_method: str = "UPI"  # UPI, ONLINE, RAZORPAY
+
+class CreateOrderRequest(BaseModel):
+    booking_id: int
+    amount: Optional[float] = None
+
+class CreateOrderResponse(BaseModel):
+    order_id: str
+    amount: int  # in paise
+    currency: str = "INR"
+    key_id: str
+
+class VerifyPaymentRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+    booking_id: int
+
+class VerifyPaymentResponse(BaseModel):
+    success: bool
+    message: str
+    payment_id: str
+    order_id: str
+    amount: float
+    status: str = "PAID"
 
 class InvoiceOut(BaseModel):
     id: int
@@ -253,18 +285,84 @@ class InvoiceOut(BaseModel):
 
 class RatingCreate(BaseModel):
     booking_id: int
-    stars: int
+    stars: Optional[int] = None
+    rating: Optional[int] = None
     feedback: Optional[str] = None
 
 class RatingOut(BaseModel):
     id: int
     booking_id: int
+    customer_id: Optional[int] = None
+    worker_id: Optional[int] = None
     stars: int
+    rating: Optional[int] = None
     feedback: Optional[str] = None
+    customer_name: Optional[str] = None
     created_at: datetime.datetime
 
     class Config:
         from_attributes = True
+
+class FeedbackCreate(BaseModel):
+    booking_id: int
+    rating: Optional[int] = None
+    stars: Optional[int] = None
+    feedback: Optional[str] = None
+
+class FeedbackOut(BaseModel):
+    id: int
+    booking_id: int
+    customer_id: int
+    worker_id: int
+    stars: int
+    rating: int
+    feedback: Optional[str] = None
+    customer_name: Optional[str] = None
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+class WorkerPerformanceOut(BaseModel):
+    worker_id: int
+    full_name: str
+    profile_photo: Optional[str] = None
+    cooperative_name: Optional[str] = None
+    cooperative_id: Optional[int] = None
+    skills: List[str] = []
+    average_rating: float
+    total_reviews: int
+    completed_jobs: int
+    total_jobs: int
+    completion_rate: float
+    bayesian_score: float
+    performance_score: float
+    rank: Optional[int] = None
+    total_workers_ranked: int = 0
+    rating_distribution: Dict[str, int] = {}
+    recent_reviews: List[FeedbackOut] = []
+
+class LeaderboardItem(BaseModel):
+    rank: int
+    worker_id: int
+    full_name: str
+    profile_photo: Optional[str] = None
+    cooperative_id: Optional[int] = None
+    cooperative_name: Optional[str] = None
+    skills: List[str] = []
+    average_rating: float
+    total_reviews: int
+    completed_jobs: int
+    completion_rate: float
+    performance_score: float
+    badge: Optional[str] = None
+
+class LeaderboardResponse(BaseModel):
+    total_workers: int
+    time_period: str
+    trade: Optional[str] = None
+    cooperative_id: Optional[int] = None
+    items: List[LeaderboardItem] = []
 
 class WelfareTransactionOut(BaseModel):
     id: int
@@ -312,3 +410,60 @@ class NotificationOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# Cooperative Membership Schemas
+class MembershipRequestCreate(BaseModel):
+    cooperative_id: int
+    membership_type: Optional[str] = "JOIN_REQUEST"  # "JOIN_REQUEST" or "EXISTING_MEMBER"
+    notes: Optional[str] = None
+
+class MembershipRejectPayload(BaseModel):
+    reason: Optional[str] = None
+
+class VerifiedCooperativeOut(BaseModel):
+    id: int
+    name: str
+    registration_number: str
+    contact_person: str
+    mobile: str
+    email: str
+    address: str
+    service_fee_pct: float
+    welfare_pct: float
+
+    class Config:
+        from_attributes = True
+
+class CooperativeMembershipOut(BaseModel):
+    id: int
+    worker_id: int
+    worker_name: Optional[str] = None
+    worker_mobile: Optional[str] = None
+    worker_email: Optional[str] = None
+    worker_address: Optional[str] = None
+    worker_skills: Optional[List[str]] = []
+    worker_rating: Optional[float] = 5.0
+    worker_status: Optional[str] = None
+    cooperative_id: int
+    cooperative_name: Optional[str] = None
+    status: str
+    membership_type: str
+    requested_at: datetime.datetime
+    approved_at: Optional[datetime.datetime] = None
+    rejected_at: Optional[datetime.datetime] = None
+    rejection_reason: Optional[str] = None
+    notes: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class WorkerMembershipStatusOut(BaseModel):
+    membership_status: str  # NOT_JOINED, PENDING, ACTIVE, REJECTED
+    worker_status: str     # PENDING_VERIFICATION, VERIFIED, REJECTED
+    cooperative_id: Optional[int] = None
+    cooperative_name: Optional[str] = None
+    cooperative_registration: Optional[str] = None
+    active_membership: Optional[Dict[str, Any]] = None
+    latest_request: Optional[Dict[str, Any]] = None
+

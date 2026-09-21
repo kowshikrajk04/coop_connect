@@ -5,9 +5,10 @@ import Link from "next/link";
 import { 
   Calendar, Clock, CheckCircle2, AlertTriangle, Star, 
   CreditCard, FileText, ChevronRight, X, Phone, User, 
-  ShieldCheck, Printer, ArrowRight
+  ShieldCheck, Printer, ArrowRight, RefreshCw
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { loadRazorpayScript } from "@/lib/razorpay";
 
 export default function CustomerBookingsPage() {
   const [activeBookings, setActiveBookings] = useState<any[]>([]);
@@ -18,6 +19,8 @@ export default function CustomerBookingsPage() {
   const [paymentModalBooking, setPaymentModalBooking] = useState<any>(null);
   const [paymentBreakdown, setPaymentBreakdown] = useState<any>(null);
   const [isPaying, setIsPaying] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentSuccessData, setPaymentSuccessData] = useState<any | null>(null);
 
   // Invoice Modal
   const [invoiceData, setInvoiceData] = useState<any>(null);
@@ -47,6 +50,8 @@ export default function CustomerBookingsPage() {
   };
 
   const handleOpenPayment = async (booking: any) => {
+    setPaymentError(null);
+    setPaymentSuccessData(null);
     try {
       const bd = await api.payments.getBreakdown(booking.id);
       setPaymentBreakdown(bd);
@@ -56,16 +61,91 @@ export default function CustomerBookingsPage() {
     }
   };
 
-  const handleProcessUPI = async () => {
+  const handleInitiateRazorpay = async () => {
     if (!paymentModalBooking) return;
     setIsPaying(true);
+    setPaymentError(null);
+
     try {
-      await api.payments.pay(paymentModalBooking.id, "UPI");
-      alert("Payment successful via UPI! Digital invoice generated.");
-      setPaymentModalBooking(null);
-      fetchBookings();
+      // 1. Ensure Razorpay Checkout script is loaded
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded) {
+        throw new Error("Razorpay Checkout SDK failed to load. Please verify your internet connection.");
+      }
+
+      // 2. Create order on backend (amount converted to paise server-side)
+      const orderData = await api.payments.createOrder(
+        paymentModalBooking.id,
+        paymentModalBooking.total_amount
+      );
+
+      // 3. Launch Razorpay Checkout Modal (Supports UPI, Card, Net Banking)
+      const options = {
+        key: orderData.key_id,
+        amount: orderData.amount, // in paise
+        currency: orderData.currency || "INR",
+        name: "CoopConnect",
+        description: `Cooperative Payment for ${paymentModalBooking.service_type} (#${paymentModalBooking.booking_number})`,
+        order_id: orderData.order_id,
+        handler: async function (response: any) {
+          try {
+            setIsPaying(true);
+            const verifyRes = await api.payments.verifyPayment({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              booking_id: paymentModalBooking.id,
+            });
+
+            setPaymentSuccessData({
+              payment_id: response.razorpay_payment_id,
+              order_id: response.razorpay_order_id,
+              amount: verifyRes.amount || paymentModalBooking.total_amount,
+              booking_id: paymentModalBooking.id,
+            });
+            setPaymentError(null);
+            fetchBookings();
+          } catch (verifyErr: any) {
+            setPaymentError(verifyErr.message || "Payment signature verification failed. Please try again.");
+          } finally {
+            setIsPaying(false);
+          }
+        },
+        prefill: {
+          name: paymentModalBooking.customer_name || "Cooperative Customer",
+          email: "customer@coopconnect.org",
+          contact: "9876543210",
+        },
+        theme: {
+          color: "#2563EB",
+        },
+        modal: {
+          ondismiss: function () {
+            setIsPaying(false);
+            if (!paymentSuccessData) {
+              setPaymentError("Payment was cancelled. Booking remains unpaid.");
+            }
+          },
+        },
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.on("payment.failed", function (failResponse: any) {
+        console.error("Razorpay payment.failed event payload:", failResponse);
+        setIsPaying(false);
+        const err = failResponse?.error || {};
+        const errorDetails = [
+          err.description,
+          err.reason ? `(Reason: ${err.reason})` : "",
+          err.code ? `[Code: ${err.code}]` : "",
+          err.source ? `[Source: ${err.source}]` : "",
+          err.step ? `[Step: ${err.step}]` : "",
+        ].filter(Boolean).join(" ");
+        setPaymentError(errorDetails || "Payment Failed. Please try again.");
+      });
+      rzp.open();
     } catch (err: any) {
-      alert(err.message || "Payment failed");
+      setPaymentError(err.message || "Failed to initialize Razorpay checkout. Please try again.");
     } finally {
       setIsPaying(false);
     }
@@ -86,9 +166,16 @@ export default function CustomerBookingsPage() {
     if (!ratingBooking) return;
     setIsSubmittingRating(true);
     try {
-      await api.payments.submitRating(ratingBooking.id, selectedStars, ratingFeedback);
-      alert("Thank you for your rating!");
+      const res = await api.feedback.submit(ratingBooking.id, selectedStars, ratingFeedback);
+      alert(res.message || "Thank you for your feedback.");
+      // Optimistically mark as rated
+      const updateList = (list: any[]) =>
+        list.map((item) => (item.id === ratingBooking.id ? { ...item, has_rated: true } : item));
+      setActiveBookings((prev) => updateList(prev));
+      setPreviousBookings((prev) => updateList(prev));
       setRatingBooking(null);
+      setRatingFeedback("");
+      setSelectedStars(5);
       fetchBookings();
     } catch (err: any) {
       alert(err.message || "Failed to submit rating");
@@ -177,6 +264,26 @@ export default function CustomerBookingsPage() {
                         </div>
                       </div>
                     )}
+
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-xs">
+                      <div>
+                        <span className="text-gray-400 block text-[10px]">TOTAL AMOUNT</span>
+                        <span className="font-bold text-gray-900 text-sm">₹{b.total_amount}</span>
+                      </div>
+                      {!b.has_paid ? (
+                        <button
+                          onClick={() => handleOpenPayment(b)}
+                          className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-xs flex items-center gap-1.5 transition"
+                        >
+                          <CreditCard className="w-3.5 h-3.5" />
+                          <span>Pay Now</span>
+                        </button>
+                      ) : (
+                        <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          PAID
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -226,9 +333,10 @@ export default function CustomerBookingsPage() {
                         {!b.has_paid ? (
                           <button
                             onClick={() => handleOpenPayment(b)}
-                            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-xs"
+                            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-xs flex items-center gap-1.5 transition"
                           >
-                            Pay ₹{b.total_amount} (UPI)
+                            <CreditCard className="w-3.5 h-3.5" />
+                            <span>Pay Now</span>
                           </button>
                         ) : (
                           <>
@@ -261,73 +369,170 @@ export default function CustomerBookingsPage() {
         </div>
       )}
 
-      {/* PAYMENT BREAKDOWN & UPI CHECKOUT MODAL */}
+      {/* RAZORPAY TEST MODE PAYMENT MODAL */}
       {paymentModalBooking && paymentBreakdown && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl relative">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl relative border border-gray-200">
             <button
-              onClick={() => setPaymentModalBooking(null)}
+              onClick={() => {
+                setPaymentModalBooking(null);
+                setPaymentSuccessData(null);
+                setPaymentError(null);
+              }}
               className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="text-center mb-6">
-              <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-2">
-                <CreditCard className="w-6 h-6" />
+            {paymentSuccessData ? (
+              /* PAYMENT SUCCESSFUL VIEW */
+              <div className="text-center py-4 space-y-4">
+                <div className="w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto shadow-xs">
+                  <CheckCircle2 className="w-10 h-10" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-extrabold text-gray-900">Payment Successful</h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Your payment was verified and processed securely in Razorpay Test Mode.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-gray-50 rounded-xl text-left text-xs space-y-2 border border-gray-200">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Transaction ID:</span>
+                    <span className="font-mono font-bold text-gray-900 truncate max-w-[200px]">
+                      {paymentSuccessData.payment_id}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Razorpay Order ID:</span>
+                    <span className="font-mono text-gray-700 truncate max-w-[200px]">
+                      {paymentSuccessData.order_id}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Amount Paid:</span>
+                    <span className="font-bold text-emerald-700">₹{paymentSuccessData.amount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Status:</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                      PAID (Verified)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex gap-3">
+                  <button
+                    onClick={() => {
+                      const bId = paymentSuccessData.booking_id;
+                      setPaymentModalBooking(null);
+                      setPaymentSuccessData(null);
+                      handleViewInvoice(bId);
+                    }}
+                    className="w-1/2 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-semibold text-xs hover:bg-gray-50 flex items-center justify-center gap-1.5"
+                  >
+                    <FileText className="w-4 h-4 text-gray-500" />
+                    <span>View Invoice</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPaymentModalBooking(null);
+                      setPaymentSuccessData(null);
+                    }}
+                    className="w-1/2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-sm"
+                  >
+                    Done
+                  </button>
+                </div>
               </div>
-              <h3 className="text-xl font-bold text-gray-900">Cooperative Payment</h3>
-              <p className="text-xs text-gray-500">100% Transparent Fee Distribution</p>
-            </div>
+            ) : (
+              /* TRANSPARENT BREAKDOWN & CHECKOUT INITIATION */
+              <div className="space-y-4">
+                <div className="text-center">
+                  <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-2">
+                    <CreditCard className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900">Cooperative Payment</h3>
+                  <p className="text-xs text-gray-500">100% Transparent Fee Distribution</p>
+                </div>
 
-            {/* Transparent Breakdown */}
-            <div className="bg-slate-50 rounded-xl p-4 space-y-3 text-xs border border-gray-200">
-              <div className="flex justify-between text-gray-700">
-                <span>Service Charge ({paymentBreakdown.service_type}):</span>
-                <span className="font-semibold text-gray-900">₹{paymentBreakdown.service_amount}</span>
+                {/* Transparent Breakdown */}
+                <div className="bg-slate-50 rounded-xl p-4 space-y-3 text-xs border border-gray-200">
+                  <div className="flex justify-between text-gray-700">
+                    <span>Service Charge ({paymentBreakdown.service_type}):</span>
+                    <span className="font-semibold text-gray-900">₹{paymentBreakdown.service_amount}</span>
+                  </div>
+
+                  <div className="flex justify-between text-gray-600 pt-2 border-t border-gray-200">
+                    <span>Worker Take-home Payout (90%):</span>
+                    <span className="font-semibold text-emerald-700">₹{paymentBreakdown.worker_payout}</span>
+                  </div>
+
+                  <div className="flex justify-between text-gray-600">
+                    <span>Cooperative Service Fee (10%):</span>
+                    <span className="font-semibold text-gray-700">₹{paymentBreakdown.coop_fee}</span>
+                  </div>
+
+                  <div className="flex justify-between text-gray-600">
+                    <span>Member Welfare Reserve ({paymentBreakdown.welfare_pct}%):</span>
+                    <span className="font-semibold text-blue-700">₹{paymentBreakdown.welfare_contribution}</span>
+                  </div>
+
+                  <div className="flex justify-between font-bold text-sm text-gray-900 pt-2 border-t border-gray-300">
+                    <span>Total Payable:</span>
+                    <span>₹{paymentBreakdown.total_amount}</span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-blue-50 text-blue-900 text-[11px] rounded-xl leading-relaxed">
+                  <strong>Cooperative Guarantee:</strong> ₹{paymentBreakdown.welfare_contribution} is credited directly to the member's healthcare and welfare reserve.
+                </div>
+
+                <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[11px] text-gray-500">
+                  <span className="font-medium text-gray-700">Razorpay TEST MODE</span>
+                  <span className="text-gray-500">UPI • Card • Net Banking</span>
+                </div>
+
+                {/* Inline error / Payment Failed banner */}
+                {paymentError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2.5 text-xs text-red-700">
+                    <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold block">Payment Failed</span>
+                      <span>{paymentError}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentModalBooking(null);
+                      setPaymentError(null);
+                    }}
+                    className="w-1/3 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium text-xs hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleInitiateRazorpay}
+                    disabled={isPaying}
+                    className="w-2/3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-sm transition flex items-center justify-center gap-1.5"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    <span>
+                      {isPaying
+                        ? "Opening Razorpay..."
+                        : paymentError
+                        ? "Try Again"
+                        : `Pay Now (₹${paymentBreakdown.total_amount})`}
+                    </span>
+                  </button>
+                </div>
               </div>
-
-              <div className="flex justify-between text-gray-600 pt-2 border-t border-gray-200">
-                <span>Worker Take-home Payout (90%):</span>
-                <span className="font-semibold text-emerald-700">₹{paymentBreakdown.worker_payout}</span>
-              </div>
-
-              <div className="flex justify-between text-gray-600">
-                <span>Worker Welfare Contribution ({paymentBreakdown.welfare_pct}%):</span>
-                <span className="font-semibold text-blue-700">₹{paymentBreakdown.welfare_contribution}</span>
-              </div>
-
-              <div className="flex justify-between text-gray-600">
-                <span>Cooperative Service Overhead ({paymentBreakdown.coop_fee_pct}%):</span>
-                <span className="font-semibold text-gray-700">₹{paymentBreakdown.coop_fee}</span>
-              </div>
-
-              <div className="flex justify-between font-bold text-sm text-gray-900 pt-2 border-t border-gray-300">
-                <span>Total Payable:</span>
-                <span>₹{paymentBreakdown.total_amount}</span>
-              </div>
-            </div>
-
-            <div className="mt-4 p-3 bg-blue-50 text-blue-900 text-[11px] rounded-xl leading-relaxed">
-              <strong>Cooperative Guarantee:</strong> ₹{paymentBreakdown.welfare_contribution} of this payment is deposited straight into the member's welfare fund for health and pension coverage.
-            </div>
-
-            <div className="mt-6 flex gap-3">
-              <button
-                type="button"
-                onClick={() => setPaymentModalBooking(null)}
-                className="w-1/3 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-medium text-xs hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleProcessUPI}
-                disabled={isPaying}
-                className="w-2/3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-sm transition"
-              >
-                {isPaying ? "Processing UPI..." : `Pay ₹${paymentBreakdown.total_amount} via UPI`}
-              </button>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -440,7 +645,7 @@ export default function CustomerBookingsPage() {
               <Star className="w-6 h-6 fill-amber-400" />
             </div>
 
-            <h3 className="text-lg font-bold text-gray-900">Rate Cooperative Service</h3>
+            <h3 className="text-lg font-bold text-gray-900">Rate Your Service</h3>
             <p className="text-xs text-gray-500 mt-1">
               How was the workmanship of <strong>{ratingBooking.worker?.name || "the worker"}</strong>?
             </p>

@@ -29,10 +29,19 @@ def get_cooperative_dashboard(user: models.User = Depends(get_current_user), db:
     coop_revenue = sum(p.coop_fee for p in paid_payments)
     total_welfare = sum(p.welfare_contribution for p in paid_payments)
 
+    coop_id = user.cooperative.id if user.cooperative else None
+    pending_membership_requests = 0
+    if coop_id:
+        pending_membership_requests = db.query(models.CooperativeMembership).filter(
+            models.CooperativeMembership.cooperative_id == coop_id,
+            models.CooperativeMembership.status == "PENDING"
+        ).count()
+
     return {
         "total_workers": total_workers,
         "available_workers": available_workers,
         "pending_verifications": pending_workers,
+        "pending_membership_requests": pending_membership_requests,
         "total_bookings": total_bookings,
         "completed_services": completed_bookings,
         "cooperative_revenue": round(coop_revenue, 2),

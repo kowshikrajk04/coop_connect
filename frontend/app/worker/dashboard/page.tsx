@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { 
   Wrench, CheckCircle2, AlertTriangle, Clock, MapPin, 
   Phone, Compass, Star, DollarSign, HeartHandshake, 
-  Camera, ArrowRight, ShieldCheck, Power, X
+  Camera, ArrowRight, ShieldCheck, Power, X, Building2
 } from "lucide-react";
 import { api, getUserRole } from "@/lib/api";
 
@@ -14,9 +14,19 @@ export default function WorkerDashboard() {
   const router = useRouter();
 
   const [profile, setProfile] = useState<any>(null);
+  const [membershipStatus, setMembershipStatus] = useState<any>(null);
   const [jobsData, setJobsData] = useState<any>({ new_requests: [], active_jobs: [], completed_jobs: [] });
   const [isAvailable, setIsAvailable] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Cooperative membership modal state
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"EXISTING" | "NEW">("NEW");
+  const [cooperativesList, setCooperativesList] = useState<any[]>([]);
+  const [selectedCoopId, setSelectedCoopId] = useState<number | null>(null);
+  const [membershipNotes, setMembershipNotes] = useState("");
+  const [isSubmittingMembership, setIsSubmittingMembership] = useState(false);
+  const [membershipError, setMembershipError] = useState("");
 
   // Completion modal state
   const [completingJobId, setCompletingJobId] = useState<number | null>(null);
@@ -31,18 +41,62 @@ export default function WorkerDashboard() {
   const loadWorkerData = async () => {
     setIsLoading(true);
     try {
-      const p = await api.worker.getProfile();
+      const [p, j, m] = await Promise.all([
+        api.worker.getProfile(),
+        api.worker.getJobs(),
+        api.memberships.getMyStatus().catch(() => null)
+      ]);
       setProfile(p);
       setIsAvailable(p.is_available);
-
-      const j = await api.worker.getJobs();
       setJobsData(j);
+      setMembershipStatus(m);
     } catch (err: any) {
       if (getUserRole() !== "WORKER") {
         router.push("/login");
       }
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const openMembershipModal = async (mode: "EXISTING" | "NEW") => {
+    setModalMode(mode);
+    setMembershipError("");
+    setMembershipNotes("");
+    setSelectedCoopId(null);
+    setIsJoinModalOpen(true);
+    try {
+      const coops = await api.memberships.getCooperatives();
+      setCooperativesList(coops || []);
+      if (coops && coops.length > 0) {
+        setSelectedCoopId(coops[0].id);
+      }
+    } catch (e: any) {
+      setMembershipError("Failed to fetch available cooperatives list.");
+    }
+  };
+
+  const handleSubmitMembershipRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCoopId) {
+      setMembershipError("Please select a cooperative.");
+      return;
+    }
+    setIsSubmittingMembership(true);
+    setMembershipError("");
+    try {
+      await api.memberships.requestJoin({
+        cooperative_id: selectedCoopId,
+        membership_type: modalMode === "EXISTING" ? "EXISTING_MEMBER" : "JOIN_REQUEST",
+        notes: membershipNotes,
+      });
+      alert("Membership request submitted! The cooperative board has been notified for verification.");
+      setIsJoinModalOpen(false);
+      loadWorkerData();
+    } catch (err: any) {
+      setMembershipError(err.message || "Failed to submit membership request.");
+    } finally {
+      setIsSubmittingMembership(false);
     }
   };
 
@@ -154,6 +208,139 @@ export default function WorkerDashboard() {
           </button>
         </div>
       </div>
+
+      {/* COOPERATIVE MEMBERSHIP STATUS CARD */}
+      {membershipStatus?.membership_status === "ACTIVE" ? (
+        <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-5 shadow-2xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">
+                    Verified Cooperative Society
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    ✓ ACTIVE MEMBER
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mt-0.5">
+                  {membershipStatus?.cooperative_name || profile?.cooperative_name || "Cooperative Society"}
+                </h3>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  Registration: <span className="font-mono font-semibold">{membershipStatus?.cooperative_registration || "COOP-REG"}</span> • Fully eligible to receive customer job allocations via AI fairness engine.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : membershipStatus?.membership_status === "PENDING" ? (
+        <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-5 shadow-2xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center flex-shrink-0 mt-0.5">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">
+                    Cooperative Membership
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                    ⌛ PENDING APPROVAL
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mt-0.5">
+                  Awaiting Review from {membershipStatus?.latest_request?.cooperative_name || "Cooperative Society"}
+                </h3>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  Your membership request is currently under review by the cooperative admin board. You will receive an in-app alert once your membership is verified.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : membershipStatus?.membership_status === "REJECTED" ? (
+        <div className="bg-red-50/70 border border-red-200 rounded-2xl p-5 shadow-2xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-red-800 uppercase tracking-wider">
+                    Cooperative Membership
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300">
+                    ✗ NOT APPROVED
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mt-0.5">
+                  Application Not Approved by {membershipStatus?.latest_request?.cooperative_name || "Cooperative Society"}
+                </h3>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  {membershipStatus?.latest_request?.rejection_reason
+                    ? `Reason provided: "${membershipStatus.latest_request.rejection_reason}"`
+                    : "Your membership application was not approved at this time."}{" "}
+                  You are welcome to submit an application to another registered cooperative.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => openMembershipModal("NEW")}
+              className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl transition shadow-2xs whitespace-nowrap"
+            >
+              Apply to Another Cooperative
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white border-2 border-indigo-100 rounded-2xl p-5 shadow-xs">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-indigo-700 uppercase tracking-wider">
+                    Cooperative Association Required
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    NOT JOINED
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mt-0.5">
+                  Connect With an Accredited Labor Cooperative
+                </h3>
+                <p className="text-xs text-gray-600 mt-0.5 max-w-2xl">
+                  CoopConnect guarantees democratic governance and welfare benefits. Workers must belong to an active cooperative society to receive AI-allocated service jobs.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5 pt-2 lg:pt-0">
+              <button
+                onClick={() => openMembershipModal("EXISTING")}
+                className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-bold rounded-xl border border-gray-300 transition shadow-2xs flex items-center gap-1.5"
+              >
+                <ShieldCheck className="w-4 h-4 text-gray-600" />
+                <span>I am already a member</span>
+              </button>
+              <button
+                onClick={() => openMembershipModal("NEW")}
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition shadow-2xs flex items-center gap-1.5"
+              >
+                <Building2 className="w-4 h-4" />
+                <span>Find & Join a Cooperative</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Verification Notice if Pending */}
       {profile?.status === "PENDING_VERIFICATION" && (
@@ -407,6 +594,129 @@ export default function WorkerDashboard() {
                   className="w-2/3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-xs"
                 >
                   {isSubmittingCompletion ? "Submitting..." : "Submit Completion"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* COOPERATIVE MEMBERSHIP REQUEST / VERIFICATION MODAL */}
+      {isJoinModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl relative max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => setIsJoinModalOpen(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="text-center mb-6">
+              <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto mb-2">
+                <Building2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">
+                {modalMode === "EXISTING" ? "Verify Existing Cooperative Membership" : "Join a Registered Cooperative"}
+              </h3>
+              <p className="text-xs text-gray-500 mt-1">
+                {modalMode === "EXISTING"
+                  ? "Select your current cooperative society and submit your verification request."
+                  : "Choose an accredited cooperative society to join and access customer job allocations."}
+              </p>
+            </div>
+
+            {membershipError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 mb-4 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>{membershipError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitMembershipRequest} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                  Select Cooperative Society *
+                </label>
+                {cooperativesList.length === 0 ? (
+                  <p className="text-xs text-gray-500 italic p-3 bg-gray-50 rounded-xl border border-gray-200">
+                    Loading verified cooperatives...
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    {cooperativesList.map((coop) => (
+                      <label
+                        key={coop.id}
+                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition ${
+                          selectedCoopId === coop.id
+                            ? "border-indigo-600 bg-indigo-50/50 shadow-2xs"
+                            : "border-gray-200 hover:border-gray-300 bg-white"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="cooperative_id"
+                          value={coop.id}
+                          checked={selectedCoopId === coop.id}
+                          onChange={() => setSelectedCoopId(coop.id)}
+                          className="mt-1 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-gray-900 block truncate">
+                              {coop.name}
+                            </span>
+                            <span className="text-[10px] font-mono text-gray-400">
+                              {coop.registration_number}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-500 mt-0.5 truncate">
+                            {coop.address} • Contact: {coop.contact_person}
+                          </p>
+                          <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-400">
+                            <span>Admin Fee: {coop.service_fee_pct}%</span>
+                            <span>Welfare Reserve: {coop.welfare_pct}%</span>
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  {modalMode === "EXISTING"
+                    ? "Membership Details / Existing ID Number (Optional)"
+                    : "Notes / Introduction for Cooperative Board (Optional)"}
+                </label>
+                <textarea
+                  rows={3}
+                  value={membershipNotes}
+                  onChange={(e) => setMembershipNotes(e.target.value)}
+                  placeholder={
+                    modalMode === "EXISTING"
+                      ? "e.g. Member ID #DL-904, enrolled under Secretary Ramesh Kumar in 2023."
+                      : "e.g. Certified electrician with 5 years experience in domestic wiring looking to join the cooperative pool."
+                  }
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="pt-3 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsJoinModalOpen(false)}
+                  className="w-1/3 py-2.5 rounded-xl border border-gray-300 text-gray-700 font-semibold text-xs hover:bg-gray-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingMembership || cooperativesList.length === 0}
+                  className="w-2/3 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold text-xs shadow-xs transition"
+                >
+                  {isSubmittingMembership ? "Submitting..." : "Submit Membership Request"}
                 </button>
               </div>
             </form>

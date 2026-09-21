@@ -8,6 +8,7 @@ import {
   Volume2, AlertCircle, FileText, Upload, ShieldAlert, Award, ShieldCheck
 } from "lucide-react";
 import { api, setAuthData } from "@/lib/api";
+import DocumentUpload from "@/components/DocumentUpload";
 
 const TRADE_LIST = [
   "Electrician",
@@ -41,9 +42,10 @@ export default function WorkerSignupPage() {
   });
 
   // Step 3 - Documents
-  const [idDocUrl, setIdDocUrl] = useState("https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=400&q=80");
-  const [certDocUrl, setCertDocUrl] = useState("");
-  const [expProofUrl, setExpProofUrl] = useState("");
+  const [idDocFile, setIdDocFile] = useState<File | null>(null);
+  const [certDocFile, setCertDocFile] = useState<File | null>(null);
+  const [expProofFile, setExpProofFile] = useState<File | null>(null);
+  const [idDocError, setIdDocError] = useState("");
 
   // Step 4 - Assessment
   const [assessmentLang, setAssessmentLang] = useState<"en" | "hi">("en");
@@ -55,8 +57,63 @@ export default function WorkerSignupPage() {
 
   // Status
   const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [workerToken, setWorkerToken] = useState<string | null>(null);
+
+  // OTP State for Worker Step 1
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    let timer: any;
+    if (cooldown > 0) {
+      timer = setInterval(() => {
+        setCooldown((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [cooldown]);
+
+  const handleSendWorkerOtp = async () => {
+    if (cooldown > 0 || otpLoading) return;
+    setErrorMsg("");
+    setSuccessMsg("");
+    if (!email || !email.includes("@")) {
+      setErrorMsg("Please enter a valid email address first.");
+      return;
+    }
+    setOtpLoading(true);
+    try {
+      const res = await api.auth.sendOtp({ email, mobile });
+      setSuccessMsg(res.message || "OTP sent successfully to your email.");
+      setOtpSent(true);
+      setCooldown(60);
+    } catch (err: any) {
+      setErrorMsg(err.message || "Failed to send OTP. Please try again.");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleVerifyWorkerOtp = async () => {
+    if (otpCode.length < 4 || otpLoading) return;
+    setErrorMsg("");
+    setSuccessMsg("");
+    setOtpLoading(true);
+    try {
+      const res = await api.auth.verifyOtp({ email, mobile }, otpCode);
+      setSuccessMsg(res.message || "Email verified successfully.");
+      setOtpVerified(true);
+    } catch (err: any) {
+      setErrorMsg(err.message || "Invalid or expired OTP code.");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -125,6 +182,13 @@ export default function WorkerSignupPage() {
   const handleStep1Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
+    setSuccessMsg("");
+
+    if (!otpVerified) {
+      setErrorMsg("Please verify your email address with OTP before proceeding to Step 2.");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -174,14 +238,31 @@ export default function WorkerSignupPage() {
   const handleStep3Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
+    setIdDocError("");
+
+    if (!idDocFile) {
+      setIdDocError("Please select your Government Identity Document (Aadhaar / Voter ID).");
+      setErrorMsg("Please upload your Government Identity Document to proceed.");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      await api.worker.updateDocs({
-        id_document_url: idDocUrl,
-        cert_document_url: certDocUrl || null,
-        experience_proof_url: expProofUrl || null,
-      });
+      const formData = new FormData();
+      formData.append("id_document", idDocFile);
+      formData.append("id_document_url", idDocFile.name);
+
+      if (certDocFile) {
+        formData.append("cert_document", certDocFile);
+        formData.append("cert_document_url", certDocFile.name);
+      }
+      if (expProofFile) {
+        formData.append("experience_proof", expProofFile);
+        formData.append("experience_proof_url", expProofFile.name);
+      }
+
+      await api.worker.updateDocs(formData);
       setCurrentStep(4);
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to update documents.");
@@ -254,6 +335,13 @@ export default function WorkerSignupPage() {
           </div>
         )}
 
+        {successMsg && (
+          <div className="mb-6 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded-xl flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-600" />
+            <span>{successMsg}</span>
+          </div>
+        )}
+
         {/* STEP 1: Personal Information */}
         {currentStep === 1 && (
           <form onSubmit={handleStep1Submit} className="space-y-4">
@@ -298,17 +386,74 @@ export default function WorkerSignupPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Email Address <span className="text-red-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-semibold text-gray-700">
+                    Email Address <span className="text-red-500">*</span>
+                  </label>
+                  {otpVerified ? (
+                    <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Verified
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleSendWorkerOtp}
+                      disabled={cooldown > 0 || otpLoading || !email || !email.includes("@")}
+                      className={`text-xs font-semibold flex items-center gap-1 ${
+                        cooldown > 0 || !email || !email.includes("@")
+                          ? "text-gray-400 cursor-not-allowed"
+                          : "text-emerald-600 hover:text-emerald-700 underline"
+                      }`}
+                    >
+                      {otpLoading
+                        ? "Sending..."
+                        : cooldown > 0
+                        ? `Resend in ${cooldown}s`
+                        : otpSent
+                        ? "Resend OTP"
+                        : "Send OTP"}
+                    </button>
+                  )}
+                </div>
                 <input
                   type="email"
                   required
+                  disabled={otpVerified}
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (otpSent) setOtpSent(false);
+                    if (otpVerified) setOtpVerified(false);
+                  }}
                   placeholder="sunil@example.com"
                   className="w-full px-4 py-2.5 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-500 text-sm"
                 />
+
+                {otpSent && !otpVerified && (
+                  <div className="mt-3 p-3 bg-emerald-50 border border-emerald-100 rounded-xl space-y-2">
+                    <p className="text-xs text-emerald-900">
+                      Enter the 6-digit OTP sent to <strong>{email}</strong>:
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value)}
+                        placeholder="123456"
+                        className="w-1/2 text-center tracking-widest font-mono text-base py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleVerifyWorkerOtp}
+                        disabled={otpLoading || otpCode.length < 4}
+                        className="w-1/2 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition disabled:opacity-50"
+                      >
+                        {otpLoading ? "Verifying..." : "Verify Email"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -478,47 +623,43 @@ export default function WorkerSignupPage() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">
-                Government Identity Document (Aadhaar / Voter ID) <span className="text-red-500">*</span>
-              </label>
-              <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:bg-gray-50 transition">
-                <Upload className="w-6 h-6 text-gray-400 mx-auto mb-1" />
-                <span className="text-xs text-gray-600 block">Document link / Simulated photo attached</span>
-                <input
-                  type="text"
-                  required
-                  value={idDocUrl}
-                  onChange={(e) => setIdDocUrl(e.target.value)}
-                  className="mt-2 w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600"
-                />
-              </div>
-            </div>
+            <DocumentUpload
+              id="worker-identity-document"
+              label="Government Identity Document (Aadhaar / Voter ID)"
+              required
+              hintText="Click anywhere here to browse local files (PDF, JPG, JPEG, PNG)"
+              value={idDocFile}
+              onChange={(file) => {
+                setIdDocFile(file);
+                if (file) setIdDocError("");
+              }}
+              error={idDocError}
+              onErrorChange={setIdDocError}
+              accentColor="emerald"
+            />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Skill Certificate (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={certDocUrl}
-                  onChange={(e) => setCertDocUrl(e.target.value)}
-                  placeholder="Optional certificate link / photo"
-                  className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs"
+                <DocumentUpload
+                  id="worker-skill-certificate"
+                  label="Skill Certificate (Optional)"
+                  required={false}
+                  hintText="Browse certificate (PDF, JPG, PNG)"
+                  value={certDocFile}
+                  onChange={setCertDocFile}
+                  accentColor="emerald"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">
-                  Previous Experience Proof (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={expProofUrl}
-                  onChange={(e) => setExpProofUrl(e.target.value)}
-                  placeholder="Optional reference letter"
-                  className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs"
+                <DocumentUpload
+                  id="worker-experience-proof"
+                  label="Previous Experience Proof (Optional)"
+                  required={false}
+                  hintText="Browse experience proof (PDF, JPG, PNG)"
+                  value={expProofFile}
+                  onChange={setExpProofFile}
+                  accentColor="emerald"
                 />
               </div>
             </div>

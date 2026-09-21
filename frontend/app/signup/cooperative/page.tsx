@@ -3,8 +3,9 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, ArrowRight, ShieldCheck, AlertCircle, Upload } from "lucide-react";
+import { Building2, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react";
 import { api, setAuthData } from "@/lib/api";
+import DocumentUpload from "@/components/DocumentUpload";
 
 export default function CooperativeSignupPage() {
   const router = useRouter();
@@ -16,7 +17,8 @@ export default function CooperativeSignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [address, setAddress] = useState("");
-  const [docUrl, setDocUrl] = useState("https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&w=400&q=80");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState("");
 
   const [errorMsg, setErrorMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -24,19 +26,30 @@ export default function CooperativeSignupPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
+    setFileError("");
+
+    if (!selectedFile) {
+      setFileError("Please select a Registration Certificate Document (PDF, JPG, JPEG, or PNG).");
+      setErrorMsg("Please upload your Registration Certificate Document to complete registration.");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      const regRes = await api.auth.register({
-        role: "COOPERATIVE",
-        full_name: coopName,
-        mobile,
-        email,
-        password,
-        address,
-        registration_number: regNumber,
-        contact_person: contactPerson,
-      });
+      const formData = new FormData();
+      formData.append("role", "COOPERATIVE");
+      formData.append("full_name", coopName);
+      formData.append("mobile", mobile);
+      formData.append("email", email);
+      formData.append("password", password);
+      formData.append("address", address);
+      formData.append("registration_number", regNumber);
+      formData.append("contact_person", contactPerson);
+      formData.append("certificate", selectedFile);
+      formData.append("document_url", selectedFile.name);
+
+      const regRes = await api.auth.register(formData);
 
       setAuthData(regRes.access_token, regRes.role, regRes.name, regRes.user_id);
       router.push("/cooperative/dashboard");
@@ -162,22 +175,20 @@ export default function CooperativeSignupPage() {
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">
-              Registration Certificate Document <span className="text-red-500">*</span>
-            </label>
-            <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:bg-gray-50">
-              <Upload className="w-6 h-6 text-gray-400 mx-auto mb-1" />
-              <span className="text-xs text-gray-600 block">Certificate URL / Document Proof</span>
-              <input
-                type="text"
-                required
-                value={docUrl}
-                onChange={(e) => setDocUrl(e.target.value)}
-                className="mt-2 w-full px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600"
-              />
-            </div>
-          </div>
+          <DocumentUpload
+            id="coop-registration-certificate"
+            label="Registration Certificate Document"
+            required
+            hintText="Click anywhere here to browse local files (PDF, JPG, JPEG, PNG)"
+            value={selectedFile}
+            onChange={(file) => {
+              setSelectedFile(file);
+              if (file) setFileError("");
+            }}
+            error={fileError}
+            onErrorChange={setFileError}
+            accentColor="indigo"
+          />
 
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">

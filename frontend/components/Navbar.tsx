@@ -356,6 +356,17 @@ export default function Navbar() {
                 </Link>
               </>
             )}
+
+            <Link
+              href="/leaderboard"
+              className={`px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 ${
+                pathname === "/leaderboard"
+                  ? "text-blue-700 bg-blue-50 font-semibold"
+                  : "text-gray-700 hover:text-blue-700 hover:bg-gray-50"
+              }`}
+            >
+              <span>🏆 Leaderboard</span>
+            </Link>
           </nav>
 
           {/* Right Action Buttons */}
@@ -487,6 +498,7 @@ export default function Navbar() {
               <Link href="/signup/choose-role" className="block px-3 py-2 rounded text-base font-medium text-blue-600 hover:bg-blue-50">Choose Account Type</Link>
             </>
           )}
+          <Link href="/leaderboard" className="block px-3 py-2 rounded text-base font-medium text-amber-700 hover:bg-amber-50">🏆 Worker Leaderboard</Link>
         </div>
       )}
     </header>

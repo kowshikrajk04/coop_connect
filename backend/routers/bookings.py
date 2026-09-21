@@ -1,7 +1,7 @@
 import random
 import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from database import get_db
 import models
 import schemas
@@ -62,9 +62,13 @@ def create_booking(
     db.commit()
     db.refresh(new_booking)
 
-    # 4. Find all eligible verified workers
-    candidates = db.query(models.Worker).filter(
-        models.Worker.status == "VERIFIED"
+    # 4. Find all eligible verified workers who are ACTIVE cooperative members
+    candidates = db.query(models.Worker).options(
+        joinedload(models.Worker.skills),
+        joinedload(models.Worker.assessments)
+    ).filter(
+        models.Worker.status == "VERIFIED",
+        models.Worker.membership_status == "ACTIVE"
     ).all()
 
     worker_dicts = []
@@ -152,6 +156,7 @@ def create_booking(
 
     return {
         "success": True,
+        "id": new_booking.id,
         "booking_id": new_booking.id,
         "booking_number": new_booking.booking_number,
         "status": new_booking.status,

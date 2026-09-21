@@ -36,6 +36,7 @@ class Customer(Base):
 
     user = relationship("User", back_populates="customer")
     bookings = relationship("Booking", back_populates="customer")
+    ratings = relationship("Rating", back_populates="customer", cascade="all, delete-orphan")
 
 
 class Cooperative(Base):
@@ -51,7 +52,7 @@ class Cooperative(Base):
     address = Column(String, nullable=False)
     document_url = Column(String, nullable=True)
     status = Column(String, default="APPROVED")  # PENDING, APPROVED
-    service_fee_pct = Column(Float, default=5.0)       # 5%
+    service_fee_pct = Column(Float, default=10.0)      # 10% (e.g. ₹100 fee on ₹1000 service)
     welfare_pct = Column(Float, default=5.0)           # 5%
     reserve_pct = Column(Float, default=40.0)          # 40% of welfare
     training_pct = Column(Float, default=25.0)         # 25% of welfare
@@ -62,6 +63,8 @@ class Cooperative(Base):
     user = relationship("User", back_populates="cooperative")
     workers = relationship("Worker", back_populates="cooperative")
     welfare_transactions = relationship("WelfareTransaction", back_populates="cooperative")
+    verifications = relationship("WorkerVerification", back_populates="cooperative")
+    memberships = relationship("CooperativeMembership", back_populates="cooperative", cascade="all, delete-orphan")
 
 
 class Worker(Base):
@@ -82,6 +85,7 @@ class Worker(Base):
     cert_document_url = Column(String, nullable=True)
     experience_proof_url = Column(String, nullable=True)
     status = Column(String, default="PENDING_VERIFICATION")  # PENDING_VERIFICATION, VERIFIED, REJECTED
+    membership_status = Column(String, default="NOT_JOINED")  # NOT_JOINED, PENDING, ACTIVE, REJECTED
     is_available = Column(Boolean, default=True)
     rating = Column(Float, default=5.0)
     total_jobs = Column(Integer, default=0)
@@ -98,6 +102,9 @@ class Worker(Base):
     bookings = relationship("Booking", back_populates="worker")
     allocations = relationship("WorkerAllocation", back_populates="worker")
     welfare_transactions = relationship("WelfareTransaction", back_populates="worker")
+    verifications = relationship("WorkerVerification", back_populates="worker")
+    memberships = relationship("CooperativeMembership", back_populates="worker", cascade="all, delete-orphan")
+    ratings = relationship("Rating", back_populates="worker", cascade="all, delete-orphan")
 
 
 class WorkerSkill(Base):
@@ -149,6 +156,7 @@ class Booking(Base):
     customer_lng = Column(Float, default=77.2090)
     service_photo_url = Column(String, nullable=True)
     status = Column(String, default="REQUESTED")  # REQUESTED, ALLOCATED, ACCEPTED, IN_PROGRESS, COMPLETED, CANCELLED
+    payment_status = Column(String, default="PENDING")  # PENDING, PAID
     completion_photo_url = Column(String, nullable=True)
     completion_notes = Column(Text, nullable=True)
     total_amount = Column(Float, default=500.0)
@@ -160,6 +168,7 @@ class Booking(Base):
     payment = relationship("Payment", back_populates="booking", uselist=False)
     allocations = relationship("WorkerAllocation", back_populates="booking")
     rating = relationship("Rating", back_populates="booking", uselist=False)
+    transactions = relationship("PaymentTransaction", back_populates="booking")
 
 
 class WorkerAllocation(Base):
@@ -191,14 +200,35 @@ class Payment(Base):
     coop_fee = Column(Float, nullable=False)
     worker_payout = Column(Float, nullable=False)
     welfare_contribution = Column(Float, nullable=False)
-    payment_method = Column(String, default="UPI")  # UPI, ONLINE
+    payment_method = Column(String, default="UPI")  # UPI, ONLINE, RAZORPAY
     status = Column(String, default="PENDING")      # PENDING, PAID
     transaction_id = Column(String, nullable=True)
+    razorpay_order_id = Column(String, nullable=True)
+    razorpay_payment_id = Column(String, nullable=True)
     paid_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     booking = relationship("Booking", back_populates="payment")
     invoice = relationship("Invoice", back_populates="payment", uselist=False)
+
+
+class PaymentTransaction(Base):
+    __tablename__ = "payment_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False, index=True)
+    razorpay_order_id = Column(String, index=True, nullable=True)
+    razorpay_payment_id = Column(String, index=True, nullable=True)
+    razorpay_signature = Column(String, nullable=True)
+    amount = Column(Float, nullable=False)
+    currency = Column(String, default="INR")
+    status = Column(String, default="CREATED")  # CREATED, PAID, FAILED
+    error_code = Column(String, nullable=True)
+    error_description = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    paid_at = Column(DateTime, nullable=True)
+
+    booking = relationship("Booking", back_populates="transactions")
 
 
 class Invoice(Base):
@@ -239,14 +269,20 @@ class Rating(Base):
     __tablename__ = "ratings"
 
     id = Column(Integer, primary_key=True, index=True)
-    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False, unique=True)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
-    worker_id = Column(Integer, ForeignKey("workers.id"), nullable=False)
-    stars = Column(Integer, default=5)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False, unique=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    worker_id = Column(Integer, ForeignKey("workers.id"), nullable=False, index=True)
+    stars = Column(Integer, default=5, index=True)
     feedback = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
 
     booking = relationship("Booking", back_populates="rating")
+    customer = relationship("Customer", back_populates="ratings")
+    worker = relationship("Worker", back_populates="ratings")
+
+    @property
+    def rating(self):
+        return self.stars
 
 
 class Notification(Base):
@@ -261,3 +297,83 @@ class Notification(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     user = relationship("User", back_populates="notifications")
+
+
+class WorkerVerification(Base):
+    __tablename__ = "worker_verifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    worker_id = Column(Integer, ForeignKey("workers.id"), nullable=False)
+    cooperative_id = Column(Integer, ForeignKey("cooperatives.id"), nullable=False)
+    action = Column(String, nullable=False)  # VERIFY, REJECT, PENDING
+    status = Column(String, default="APPROVED")
+    reason = Column(String, nullable=True)
+    verified_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    worker = relationship("Worker", back_populates="verifications")
+    cooperative = relationship("Cooperative", back_populates="verifications")
+
+
+class Service(Base):
+    __tablename__ = "services"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    category = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    base_price = Column(Float, default=500.0)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class DemandForecast(Base):
+    __tablename__ = "demand_forecasts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cooperative_id = Column(Integer, ForeignKey("cooperatives.id"), nullable=True)
+    category = Column(String, nullable=False)
+    predicted_weekly_demand = Column(Float, default=0.0)
+    demand_share_pct = Column(Float, default=0.0)
+    trend = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+# Aliases for explicit semantic naming
+ServiceRequest = Booking
+WelfareContribution = WelfareTransaction
+
+
+class OTPVerification(Base):
+    __tablename__ = "otp_verifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), index=True, nullable=True)
+    mobile = Column(String(15), index=True, nullable=True)
+    otp_hash = Column(String(128), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, default=0)
+    verified = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    verified_at = Column(DateTime, nullable=True)
+
+
+class CooperativeMembership(Base):
+    __tablename__ = "cooperative_memberships"
+
+    id = Column(Integer, primary_key=True, index=True)
+    worker_id = Column(Integer, ForeignKey("workers.id"), nullable=False)
+    cooperative_id = Column(Integer, ForeignKey("cooperatives.id"), nullable=False)
+    status = Column(String, default="PENDING")  # PENDING, APPROVED, REJECTED
+    membership_type = Column(String, default="JOIN_REQUEST")  # JOIN_REQUEST, EXISTING_MEMBER
+    requested_at = Column(DateTime, default=datetime.datetime.utcnow)
+    approved_at = Column(DateTime, nullable=True)
+    rejected_at = Column(DateTime, nullable=True)
+    rejection_reason = Column(String, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    worker = relationship("Worker", back_populates="memberships")
+    cooperative = relationship("Cooperative", back_populates="memberships")
+
+

@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Users, ArrowRight, ShieldCheck, CheckCircle2, AlertCircle } from "lucide-react";
+import { Users, ArrowRight, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
 import { api, setAuthData } from "@/lib/api";
 
 export default function CustomerSignupPage() {
@@ -20,16 +20,33 @@ export default function CustomerSignupPage() {
   // OTP state
   const [step, setStep] = useState<"FORM" | "OTP">("FORM");
   const [otpCode, setOtpCode] = useState("");
-  const [sentOtpHint, setSentOtpHint] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    let timer: any;
+    if (cooldown > 0) {
+      timer = setInterval(() => {
+        setCooldown((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [cooldown]);
 
   const handleInitialSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg("");
+    setSuccessMsg("");
 
     if (password !== confirmPassword) {
       setErrorMsg("Passwords do not match.");
+      return;
+    }
+
+    if (!email || !email.includes("@")) {
+      setErrorMsg("Please enter a valid email address.");
       return;
     }
 
@@ -40,12 +57,28 @@ export default function CustomerSignupPage() {
 
     setIsLoading(true);
     try {
-      // Trigger OTP
-      const otpRes = await api.auth.sendOtp(mobile);
-      setSentOtpHint(otpRes.demo_otp || "123456");
+      const otpRes = await api.auth.sendOtp({ email, mobile });
+      setSuccessMsg(otpRes.message || "Verification OTP sent to your email.");
+      setCooldown(60);
       setStep("OTP");
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to send OTP. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (cooldown > 0 || isLoading) return;
+    setErrorMsg("");
+    setSuccessMsg("");
+    setIsLoading(true);
+    try {
+      const res = await api.auth.sendOtp({ email, mobile });
+      setSuccessMsg(res.message || "A new OTP has been sent to your email.");
+      setCooldown(60);
+    } catch (err: any) {
+      setErrorMsg(err.message || "Failed to resend OTP. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -58,7 +91,7 @@ export default function CustomerSignupPage() {
 
     try {
       // 1. Verify OTP
-      await api.auth.verifyOtp(mobile, otpCode);
+      await api.auth.verifyOtp({ email, mobile }, otpCode);
 
       // 2. Complete Customer Registration
       const regRes = await api.auth.register({
@@ -207,20 +240,35 @@ export default function CustomerSignupPage() {
         ) : (
           /* Step 2: OTP Verification */
           <form onSubmit={handleVerifyOtpAndRegister} className="mt-6 space-y-5">
+            {successMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-600" />
+                <span>{successMsg}</span>
+              </div>
+            )}
+
             <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-900 leading-relaxed">
-              <p className="font-semibold text-sm mb-1">Verify Mobile Number</p>
-              An SMS containing a 6-digit verification code was sent to <strong>+91 {mobile}</strong>.
-              {sentOtpHint && (
-                <div className="mt-2 text-blue-700 font-mono bg-white px-2 py-1 rounded inline-block border border-blue-200">
-                  Prototype Test Code: <strong>{sentOtpHint}</strong>
-                </div>
-              )}
+              <p className="font-semibold text-sm mb-1">Verify Email Address</p>
+              An email containing a 6-digit verification code was sent to <strong>{email}</strong>.
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">
-                Enter 6-Digit OTP <span className="text-red-500">*</span>
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-semibold text-gray-700">
+                  Enter 6-Digit OTP <span className="text-red-500">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleResendOtp}
+                  disabled={cooldown > 0 || isLoading}
+                  className={`text-xs font-semibold flex items-center gap-1 ${
+                    cooldown > 0 ? "text-gray-400 cursor-not-allowed" : "text-blue-600 hover:text-blue-700"
+                  }`}
+                >
+                  <RefreshCw className={`w-3 h-3 ${isLoading ? "animate-spin" : ""}`} />
+                  {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend OTP"}
+                </button>
+              </div>
               <input
                 type="text"
                 required
