@@ -55,76 +55,123 @@ def verify_otp_hash(submitted_otp: str, target: str, stored_hash: str) -> bool:
 
 def send_email_otp(recipient_email: str, otp: str) -> dict:
     """
-    Dispatches OTP via Gmail SMTP (TLS on port 587).
-    Subject: CoopConnect Email Verification
-    Body matches exact specification:
-    Your CoopConnect verification OTP is: {OTP}
-
-    This OTP is valid for 5 minutes.
-    Do not share this OTP with anyone.
-    
-    Does NOT log sensitive OTP or credentials.
+    Sends CoopConnect OTP using Resend HTTPS API.
+    Does not log OTPs or API keys.
     """
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_username = os.getenv("SMTP_USERNAME", "").strip()
-    smtp_password = os.getenv("SMTP_PASSWORD", "").strip()
 
-    if not smtp_username or not smtp_password:
-        logger.warning("SMTP_USERNAME or SMTP_PASSWORD is not configured in backend/.env.")
+    api_key = os.getenv("RESEND_API_KEY", "").strip()
+
+    # Resend's test sender. For production, use your verified domain.
+    from_email = os.getenv(
+        "RESEND_FROM_EMAIL",
+        "CoopConnect <onboarding@resend.dev>"
+    ).strip()
+
+    if not api_key:
+        logger.error("RESEND_API_KEY is not configured.")
         return {
             "success": False,
             "reason": "credentials_missing",
-            "message": "Gmail SMTP is not configured. Please set SMTP_USERNAME and SMTP_PASSWORD in backend/.env.",
+            "message": "Resend API key is not configured."
         }
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "CoopConnect Email Verification"
-    msg["From"] = f"CoopConnect <{smtp_username}>"
-    msg["To"] = recipient_email
 
     body_text = f"""Your CoopConnect verification OTP is: {otp}
 
 This OTP is valid for 5 minutes.
 Do not share this OTP with anyone."""
 
-    msg.attach(MIMEText(body_text, "plain", "utf-8"))
+    payload = {
+        "from": from_email,
+        "to": [recipient_email],
+        "subject": "CoopConnect Email Verification",
+        "text": body_text
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
 
     # Mask recipient email for logging
     parts = recipient_email.split("@")
-    masked_target = f"{parts[0][:3]}***@{parts[1]}" if len(parts) == 2 and len(parts[0]) >= 3 else "***"
+    masked_target = (
+        f"{parts[0][:3]}***@{parts[1]}"
+        if len(parts) == 2 and len(parts[0]) >= 3
+        else "***"
+    )
 
     try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(smtp_username, smtp_password)
-            server.sendmail(smtp_username, [recipient_email], msg.as_string())
+        response = requests.post(
+            "https://api.resend.com/emails",
+            json=payload,
+            headers=headers,
+            timeout=20
+        )
 
-        logger.info(f"Email OTP sent successfully to {masked_target} via Gmail SMTP.")
-        return {
-            "success": True,
-            "message": "Verification code sent to your email."
-        }
-    except smtplib.SMTPAuthenticationError as e:
-        logger.error(f"Gmail SMTP authentication failed for {smtp_username}: {e.smtp_error}")
+        if response.status_code in (200, 201):
+            logger.info(
+                f"Email OTP accepted by Resend for {masked_target}."
+            )
+            return {
+                "success": True,
+                "message": "Verification code sent to your email."
+            }
+
+        # Avoid logging credentials or OTP content.
+        logger.error(
+            "Resend email API failed. HTTP status: %s",
+            response.status_code
+        )
+
+        if response.status_code == 401:
+            return {
+                "success": False,
+                "reason": "auth_error",
+                "message": "Resend API key is invalid or unauthorized."
+            }
+
+        if response.status_code == 403:
+            return {
+                "success": False,
+                "reason": "sender_or_permission_error",
+                "message": (
+                    "Resend rejected the sender or API permission. "
+                    "Check your sender domain and API key permissions."
+                )
+            }
+
         return {
             "success": False,
-            "reason": "auth_error",
-            "message": "Gmail SMTP authentication failed. Please verify your Gmail address and 16-character Google App Password."
+            "reason": "resend_error",
+            "message": "Resend could not accept the email request."
         }
-    except smtplib.SMTPConnectError as e:
-        logger.error(f"Gmail SMTP connection failed: {str(e)}")
+
+    except requests.Timeout:
+        logger.error("Resend API request timed out.")
         return {
             "success": False,
-            "reason": "connection_error",
-            "message": "Could not connect to Gmail SMTP server. Please check your network connection."
+            "reason": "timeout",
+            "message": "Email service timed out. Please try again."
         }
+
+    except requests.RequestException as e:
+        logger.error(
+            "Resend API network request failed: %s",
+            type(e).__name__
+        )
+        return {
+            "success": False,
+            "reason": "network_error",
+            "message": "Could not connect to the email service."
+        }
+
     except Exception as e:
-        logger.error(f"Failed to dispatch Email OTP to {masked_target}: {str(e)}")
+        logger.error(
+            "Unexpected email dispatch error: %s",
+            type(e).__name__
+        )
         return {
             "success": False,
-            "reason": "smtp_error",
-            "message": f"Failed to send email OTP: {str(e)}"
+            "reason": "email_error",
+            "message": "Failed to send email OTP."
         }
