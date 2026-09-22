@@ -1,7 +1,13 @@
 import datetime
+import os
 import random
 import uuid
 from pathlib import Path
+
+try:
+    OTP_EXPIRY_SECONDS = int(os.getenv("OTP_EXPIRY", "300"))
+except ValueError:
+    OTP_EXPIRY_SECONDS = 300
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
 from sqlalchemy.orm import Session
 from database import get_db
@@ -219,7 +225,7 @@ def send_otp(req: schemas.OTPRequest, db: Session = Depends(get_db)):
     # 2. Generate secure 6-digit OTP & salted hash
     otp = generate_secure_otp(6)
     hashed = hash_otp(otp, normalized_email)
-    expires_at = now + datetime.timedelta(seconds=300)
+    expires_at = now + datetime.timedelta(seconds=OTP_EXPIRY_SECONDS)
 
     # 3. Store record in PostgreSQL
     otp_record = models.OTPVerification(
