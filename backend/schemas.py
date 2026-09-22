@@ -30,8 +30,16 @@ class UserLogin(BaseModel):
 class OTPRequest(BaseModel):
     email: Optional[str] = None
     mobile: Optional[str] = None
+    purpose: Optional[str] = None  # e.g. "login", "register"
 
 class OTPVerify(BaseModel):
+    email: Optional[str] = None
+    mobile: Optional[str] = None
+    otp: str
+    purpose: Optional[str] = None  # e.g. "login"
+
+class OTPLoginRequest(BaseModel):
+    login_id: Optional[str] = None  # email or mobile
     email: Optional[str] = None
     mobile: Optional[str] = None
     otp: str
@@ -39,6 +47,11 @@ class OTPVerify(BaseModel):
 class OTPResponse(BaseModel):
     success: bool
     message: str
+    access_token: Optional[str] = None
+    token_type: Optional[str] = "bearer"
+    role: Optional[str] = None
+    user_id: Optional[int] = None
+    name: Optional[str] = None
 
 
 class UserOut(BaseModel):

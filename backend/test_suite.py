@@ -182,5 +182,50 @@ def test_full_coopconnect_flow():
 
     print("\nALL BACKEND TESTS PASSED SUCCESSFULLY!")
 
+def test_otp_verification_and_dummy_mode():
+    from unittest.mock import patch
+
+    print("\n--- Testing OTP Verification & Dummy Mode Flow ---")
+
+    # 1. Unregistered email rejection
+    unreg_res = client.post("/api/auth/send-otp", json={"email": "unregistered_random_user@example.com", "purpose": "login"})
+    assert unreg_res.status_code == 404
+    assert "No account found" in unreg_res.json()["detail"]
+    print("Unregistered email rejected with 404:", unreg_res.json()["detail"])
+
+    # 2. Dummy OTP enabled: send and login with 123456
+    with patch.dict(os.environ, {"DEV_DUMMY_OTP_ENABLED": "true", "ENVIRONMENT": "development"}, clear=False):
+        send_res = client.post("/api/auth/send-otp", json={"email": "customer@demo.com", "purpose": "login"})
+        assert send_res.status_code == 200
+        assert "[DEV MODE]" in send_res.json()["message"]
+        print("Dummy OTP send successful:", send_res.json()["message"])
+
+        # Login with valid dummy OTP 123456
+        login_res = client.post("/api/auth/login-otp", json={"login_id": "customer@demo.com", "otp": "123456"})
+        assert login_res.status_code == 200
+        data = login_res.json()
+        assert "access_token" in data
+        assert data["role"] == "CUSTOMER"
+        print("Dummy OTP 123456 accepted! Logged in as:", data["name"], "Role:", data["role"])
+
+    # 3. Invalid OTP rejected with attempts count
+    with patch.dict(os.environ, {"DEV_DUMMY_OTP_ENABLED": "true", "ENVIRONMENT": "development"}, clear=False):
+        # Generate new OTP
+        client.post("/api/auth/send-otp", json={"email": "customer@demo.com", "purpose": "login"})
+        bad_res = client.post("/api/auth/login-otp", json={"login_id": "customer@demo.com", "otp": "999999"})
+        assert bad_res.status_code == 400
+        assert "Invalid OTP code" in bad_res.json()["detail"]
+        print("Invalid OTP rejected with attempt count:", bad_res.json()["detail"])
+
+    # 4. Dummy OTP rejected in production
+    with patch.dict(os.environ, {"DEV_DUMMY_OTP_ENABLED": "true", "ENVIRONMENT": "production"}, clear=False):
+        prod_res = client.post("/api/auth/login-otp", json={"login_id": "customer@demo.com", "otp": "123456"})
+        assert prod_res.status_code == 400
+        assert "Invalid OTP code" in prod_res.json()["detail"]
+        print("Dummy OTP strictly rejected in production environment.")
+
+    print("ALL OTP & DUMMY MODE TESTS PASSED SUCCESSFULLY!")
+
 if __name__ == "__main__":
+    test_otp_verification_and_dummy_mode()
     test_full_coopconnect_flow()

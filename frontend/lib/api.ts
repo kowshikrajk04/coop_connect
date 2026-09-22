@@ -56,10 +56,20 @@ async function request(endpoint: string, options: RequestInit = {}) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      headers,
+    });
+  } catch (err: any) {
+    if (err?.name === "TypeError" || String(err?.message || "").toLowerCase().includes("fetch")) {
+      throw new Error(
+        `Unable to reach the CoopConnect server at ${API_BASE}. Please ensure the backend is running.`
+      );
+    }
+    throw err;
+  }
 
   const data = await response.json().catch(() => ({}));
 
@@ -81,6 +91,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ login_id, password }),
       }),
+    loginOtp: (login_id: string, otp: string) =>
+      request("/api/auth/login-otp", {
+        method: "POST",
+        body: JSON.stringify({ login_id, otp }),
+      }),
     register: (payload: any) => {
       const isFormData = typeof FormData !== "undefined" && payload instanceof FormData;
       return request("/api/auth/register", {
@@ -88,7 +103,7 @@ export const api = {
         body: isFormData ? payload : JSON.stringify(payload),
       });
     },
-    sendOtp: (target: string | { email?: string; mobile?: string }) => {
+    sendOtp: (target: string | { email?: string; mobile?: string; purpose?: string }) => {
       const body = typeof target === "string"
         ? (target.includes("@") ? { email: target } : { mobile: target, email: target })
         : target;
@@ -97,7 +112,7 @@ export const api = {
         body: JSON.stringify(body),
       });
     },
-    verifyOtp: (target: string | { email?: string; mobile?: string }, otp: string) => {
+    verifyOtp: (target: string | { email?: string; mobile?: string; purpose?: string }, otp: string) => {
       const body = typeof target === "string"
         ? (target.includes("@") ? { email: target, otp } : { mobile: target, otp })
         : { ...target, otp };

@@ -55,6 +55,8 @@ cors_env = os.getenv("CORS_ORIGINS", "")
 allowed_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
 ]
 if cors_env:
     for origin in cors_env.split(","):
@@ -65,10 +67,11 @@ if cors_env:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins if allowed_origins else ["*"],
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origin_regex=r"^(https?://(localhost|127\.0\.0\.1)(:\d+)?|https://.*\.vercel\.app)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Mount existing routers

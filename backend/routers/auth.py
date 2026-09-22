@@ -2,13 +2,44 @@ import datetime
 import os
 import random
 import uuid
+import logging
 from pathlib import Path
+from dotenv import load_dotenv
+
+env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
+logger = logging.getLogger("coopconnect.auth")
 
 try:
     OTP_EXPIRY_SECONDS = int(os.getenv("OTP_EXPIRY", "300"))
 except ValueError:
     OTP_EXPIRY_SECONDS = 300
+
+
+def is_dummy_otp_mode_active() -> bool:
+    """
+    Checks if development dummy OTP mode is active.
+    Dynamically checks backend/.env and os.environ so changes in .env take effect immediately.
+    Strictly disabled in production environments.
+    """
+    env_name = os.getenv("ENVIRONMENT", os.getenv("ENV", "")).strip().lower()
+    if env_name in ("production", "prod", "live"):
+        return False
+    if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID") or os.getenv("K_SERVICE") or os.getenv("AWS_EXECUTION_ENV"):
+        return False
+
+    # Reload backend/.env dynamically with override=True to guarantee fresh flag value
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path, override=True)
+
+    raw = os.getenv("DEV_DUMMY_OTP_ENABLED", "false")
+    val = str(raw).strip().strip("'\"").lower()
+    return val in ("true", "1", "yes")
+
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import get_db
 import models
@@ -192,6 +223,116 @@ def login(req: schemas.UserLogin, db: Session = Depends(get_db)):
         name=name
     )
 
+@router.post("/login-otp", response_model=schemas.TokenResponse)
+def login_with_otp(req: schemas.OTPLoginRequest, db: Session = Depends(get_db)):
+    target_identifier = (req.login_id or req.email or req.mobile or "").strip()
+    if not target_identifier:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please provide your registered email or mobile number."
+        )
+
+    is_valid_email, normalized_email = normalize_email(target_identifier)
+    lookup_email = normalized_email if is_valid_email else target_identifier
+
+    # 1. Require registered user (do not create user automatically)
+    user = db.query(models.User).filter(
+        (func.lower(models.User.email) == lookup_email) | (models.User.mobile == target_identifier)
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email or mobile. Please check your credentials or sign up."
+        )
+
+    if hasattr(user, "is_active") and not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been deactivated. Please contact support."
+        )
+
+    now = datetime.datetime.utcnow()
+
+    # 2. Find latest unverified OTP record
+    filter_cond = (func.lower(models.OTPVerification.email) == lookup_email)
+    if user.email:
+        filter_cond = filter_cond | (func.lower(models.OTPVerification.email) == user.email.lower())
+    if user.mobile:
+        filter_cond = filter_cond | (models.OTPVerification.mobile == user.mobile)
+
+    record = db.query(models.OTPVerification).filter(
+        filter_cond,
+        models.OTPVerification.verified == False
+    ).order_by(models.OTPVerification.id.desc()).first()
+
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active OTP request found. Please request an OTP code first."
+        )
+
+    if record.attempts >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum verification attempts exceeded. Please request a new OTP."
+        )
+
+    if now > record.expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OTP has expired. Please request a new OTP code."
+        )
+
+    submitted_otp = req.otp.strip()
+    dummy_active = is_dummy_otp_mode_active()
+    env_name = os.getenv("ENVIRONMENT", os.getenv("ENV", "")).strip().lower()
+    is_prod = env_name in ("production", "prod", "live") or bool(os.getenv("RENDER")) or bool(os.getenv("RENDER_SERVICE_ID"))
+
+    is_match = False
+    if dummy_active and submitted_otp == "123456":
+        is_match = True
+        logger.info("DEV_DUMMY_OTP_ENABLED: Login dummy OTP 123456 verified for user %s (%s).", user.id, user.email)
+    elif is_prod and submitted_otp == "123456":
+        # Strictly reject dummy OTP in production
+        is_match = False
+    else:
+        lookup_target = record.email or record.mobile or lookup_email
+        is_match = verify_otp_hash(submitted_otp, lookup_target, record.otp_hash)
+
+    if not is_match:
+        record.attempts += 1
+        db.commit()
+        remaining = max(0, 5 - record.attempts)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid OTP code. {remaining} attempt(s) remaining."
+        )
+
+    # 3. Mark verified
+    record.verified = True
+    record.verified_at = now
+    user.otp_verified = True
+    db.commit()
+
+    # 4. Generate normal JWT session token
+    name = "User"
+    if user.role == "CUSTOMER" and user.customer:
+        name = user.customer.full_name
+    elif user.role == "WORKER" and user.worker:
+        name = user.worker.full_name
+    elif user.role == "COOPERATIVE" and user.cooperative:
+        name = user.cooperative.name
+
+    token = create_access_token({"sub": str(user.id), "role": user.role})
+    logger.info("User %s (%s) logged in successfully via OTP.", user.id, user.role)
+    return schemas.TokenResponse(
+        access_token=token,
+        role=user.role,
+        user_id=user.id,
+        name=name
+    )
+
 @router.post("/send-otp", response_model=schemas.OTPResponse)
 def send_otp(req: schemas.OTPRequest, db: Session = Depends(get_db)):
     # Determine recipient email
@@ -205,6 +346,22 @@ def send_otp(req: schemas.OTPRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Please provide a valid email address."
         )
+
+    # If purpose is login, verify that user account actually exists (prevent creating or sending to unregistered)
+    if req.purpose == "login":
+        existing_user = db.query(models.User).filter(
+            (func.lower(models.User.email) == normalized_email) | (models.User.mobile == target_email)
+        ).first()
+        if not existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No account found with this email. Please check your email or sign up."
+            )
+        if hasattr(existing_user, "is_active") and not existing_user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This account has been deactivated. Please contact support."
+            )
 
     now = datetime.datetime.utcnow()
 
@@ -223,7 +380,12 @@ def send_otp(req: schemas.OTPRequest, db: Session = Depends(get_db)):
             )
 
     # 2. Generate secure 6-digit OTP & salted hash
-    otp = generate_secure_otp(6)
+    dummy_active = is_dummy_otp_mode_active()
+    if dummy_active:
+        otp = "123456"
+    else:
+        otp = generate_secure_otp(6)
+
     hashed = hash_otp(otp, normalized_email)
     expires_at = now + datetime.timedelta(seconds=OTP_EXPIRY_SECONDS)
 
@@ -240,7 +402,17 @@ def send_otp(req: schemas.OTPRequest, db: Session = Depends(get_db)):
     db.add(otp_record)
     db.commit()
 
-    # 4. Dispatch Email via Gmail SMTP
+    # 4. Dispatch Email via Gmail SMTP (skip if dummy OTP mode is active)
+    if dummy_active:
+        logger.info(
+            "DEV_DUMMY_OTP_ENABLED: Generated dummy OTP 123456 for %s (email dispatch skipped).",
+            normalized_email
+        )
+        return schemas.OTPResponse(
+            success=True,
+            message=f"[DEV MODE] Dummy OTP 123456 generated for {normalized_email}. Use 123456 to verify."
+        )
+
     email_result = send_email_otp(normalized_email, otp)
     if not email_result.get("success") and email_result.get("reason") == "credentials_missing":
         return schemas.OTPResponse(
@@ -269,7 +441,7 @@ def verify_otp(req: schemas.OTPVerify, db: Session = Depends(get_db)):
     filter_cond = None
     target_identifier = None
     if is_valid:
-        filter_cond = (models.OTPVerification.email == normalized_email)
+        filter_cond = (func.lower(models.OTPVerification.email) == normalized_email)
         target_identifier = normalized_email
     elif req.mobile:
         filter_cond = (models.OTPVerification.mobile == req.mobile.strip())
@@ -308,9 +480,24 @@ def verify_otp(req: schemas.OTPVerify, db: Session = Depends(get_db)):
             detail="OTP has expired. Please request a new OTP."
         )
 
-    # Verify submitted OTP against stored hash
+    # Verify submitted OTP against stored hash (with safe dummy OTP handling for dev)
     lookup_target = record.email or record.mobile or target_identifier
-    is_match = verify_otp_hash(req.otp.strip(), lookup_target, record.otp_hash)
+    submitted_otp = req.otp.strip()
+
+    dummy_active = is_dummy_otp_mode_active()
+    env_name = os.getenv("ENVIRONMENT", os.getenv("ENV", "")).strip().lower()
+    is_prod = env_name in ("production", "prod", "live") or bool(os.getenv("RENDER")) or bool(os.getenv("RENDER_SERVICE_ID"))
+
+    is_match = False
+    if dummy_active and submitted_otp == "123456":
+        is_match = True
+        logger.info("DEV_DUMMY_OTP_ENABLED: Verified dummy OTP 123456 for %s.", lookup_target)
+    elif is_prod and submitted_otp == "123456":
+        # In production, strictly reject dummy OTP 123456
+        is_match = False
+    else:
+        is_match = verify_otp_hash(submitted_otp, lookup_target, record.otp_hash)
+
     if not is_match:
         record.attempts += 1
         db.commit()
@@ -325,16 +512,38 @@ def verify_otp(req: schemas.OTPVerify, db: Session = Depends(get_db)):
     record.verified_at = now
 
     # Also update user if already registered
+    user = None
     if record.email:
         user = db.query(models.User).filter(models.User.email == record.email).first()
         if user:
             user.otp_verified = True
-    if record.mobile:
+    if not user and record.mobile:
         user = db.query(models.User).filter(models.User.mobile == record.mobile).first()
         if user:
             user.otp_verified = True
 
     db.commit()
+
+    # If verification purpose was login, return session JWT token data
+    if req.purpose == "login" and user:
+        name = "User"
+        if user.role == "CUSTOMER" and user.customer:
+            name = user.customer.full_name
+        elif user.role == "WORKER" and user.worker:
+            name = user.worker.full_name
+        elif user.role == "COOPERATIVE" and user.cooperative:
+            name = user.cooperative.name
+
+        token = create_access_token({"sub": str(user.id), "role": user.role})
+        return schemas.OTPResponse(
+            success=True,
+            message="Login successful.",
+            access_token=token,
+            token_type="bearer",
+            role=user.role,
+            user_id=user.id,
+            name=name
+        )
 
     return schemas.OTPResponse(
         success=True,
