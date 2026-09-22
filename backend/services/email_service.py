@@ -1,4 +1,5 @@
 import os
+import requests
 import re
 import hmac
 import hashlib
@@ -10,7 +11,6 @@ from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 from dotenv import load_dotenv
 from typing import Tuple
-import requests
 
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
