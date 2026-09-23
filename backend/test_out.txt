@@ -1,0 +1,215 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.5, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend
+plugins: anyio-4.13.0, langsmith-0.8.14
+collected 1 item
+
+test_suite.py 
+--- 1. Testing Reset to Initial Empty State (if demo router mounted) ---
+F
+
+================================== FAILURES ===================================
+_________________________ test_full_coopconnect_flow __________________________
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\default.py:951: in do_execute
+    cursor.execute(statement, parameters)
+E   psycopg2.errors.DeadlockDetected: deadlock detected
+E   DETAIL:  Process 7012 waits for AccessExclusiveLock on relation 150740 of database 16396; blocked by process 6879.
+E   Process 6879 waits for AccessShareLock on relation 150709 of database 16396; blocked by process 7012.
+E   HINT:  See server log for query details.
+
+The above exception was the direct cause of the following exception:
+test_suite.py:14: in test_full_coopconnect_flow
+    res = client.post("/api/demo/reset")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\testclient.py:546: in post
+    return super().post(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:1144: in post
+    return self.request(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\testclient.py:445: in request
+    return super().request(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:914: in send
+    response = self._send_handling_auth(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\httpx\_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\testclient.py:348: in handle_request
+    raise exc
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\testclient.py:345: in handle_request
+    portal.call(self.app, scope, receive, send)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\anyio\from_thread.py:334: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Program Files\Python313\Lib\concurrent\futures\_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+C:\Program Files\Python313\Lib\concurrent\futures\_base.py:401: in __get_result
+    raise self._exception
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\anyio\from_thread.py:259: in _call_func
+    retval = await retval_or_awaitable
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\fastapi\applications.py:1159: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\applications.py:107: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\middleware\cors.py:87: in __call__
+    await self.app(scope, receive, send)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\routing.py:716: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\routing.py:736: in app
+    await route.handle(scope, receive, send)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\routing.py:290: in handle
+    await self.app(scope, receive, send)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\fastapi\routing.py:134: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\fastapi\routing.py:120: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\fastapi\routing.py:674: in app
+    raw_response = await run_endpoint_function(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\fastapi\routing.py:330: in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\starlette\concurrency.py:32: in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\anyio\to_thread.py:63: in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\anyio\_backends\_asyncio.py:2518: in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\anyio\_backends\_asyncio.py:1002: in run
+    result = context.run(func, *args)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+routers\demo_data.py:17: in reset_to_empty_state
+    Base.metadata.drop_all(bind=engine)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\sql\schema.py:5956: in drop_all
+    bind._run_ddl_visitor(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\base.py:3252: in _run_ddl_visitor
+    conn._run_ddl_visitor(visitorcallable, element, **kwargs)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\base.py:2459: in _run_ddl_visitor
+    ).traverse_single(element)
+      ^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\sql\visitors.py:661: in traverse_single
+    return meth(obj, **kw)
+           ^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\sql\ddl.py:1142: in visit_metadata
+    self.traverse_single(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\sql\visitors.py:661: in traverse_single
+    return meth(obj, **kw)
+           ^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\sql\ddl.py:1209: in visit_table
+    DropTable(table)._invoke_with(self.connection)
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\sql\ddl.py:321: in _invoke_with
+    return bind.execute(self)
+           ^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\base.py:1419: in execute
+    return meth(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\sql\ddl.py:187: in _execute_on_connection
+    return connection._execute_ddl(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\base.py:1530: in _execute_ddl
+    ret = self._execute_context(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\base.py:1846: in _execute_context
+    return self._exec_single_context(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\base.py:2355: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+..\..\..\..\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\default.py:951: in do_execute
+    cursor.execute(statement, parameters)
+E   sqlalchemy.exc.OperationalError: (psycopg2.errors.DeadlockDetected) deadlock detected
+E   DETAIL:  Process 7012 waits for AccessExclusiveLock on relation 150740 of database 16396; blocked by process 6879.
+E   Process 6879 waits for AccessShareLock on relation 150709 of database 16396; blocked by process 7012.
+E   HINT:  See server log for query details.
+E   
+E   [SQL: 
+E   DROP TABLE otp_verifications]
+E   (Background on this error at: https://sqlalche.me/e/20/e3q8)
+============================== warnings summary ===============================
+schemas.py:57
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:57: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class UserOut(BaseModel):
+
+schemas.py:69
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:69: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class CustomerOut(BaseModel):
+
+schemas.py:81
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:81: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class WorkerSkillSchema(BaseModel):
+
+schemas.py:97
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:97: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class SkillAssessmentSchema(BaseModel):
+
+schemas.py:136
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:136: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class WorkerOut(BaseModel):
+
+schemas.py:166
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:166: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class CooperativeOut(BaseModel):
+
+schemas.py:212
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:212: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class BookingOut(BaseModel):
+
+schemas.py:284
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:284: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class InvoiceOut(BaseModel):
+
+schemas.py:305
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:305: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class RatingOut(BaseModel):
+
+schemas.py:325
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:325: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class FeedbackOut(BaseModel):
+
+schemas.py:380
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:380: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class WelfareTransactionOut(BaseModel):
+
+schemas.py:416
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:416: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class NotificationOut(BaseModel):
+
+schemas.py:437
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:437: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class VerifiedCooperativeOut(BaseModel):
+
+schemas.py:451
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:451: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class CooperativeMembershipOut(BaseModel):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED test_suite.py::test_full_coopconnect_flow - sqlalchemy.exc.Operational...
+======================= 1 failed, 14 warnings in 44.72s =======================

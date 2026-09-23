@@ -73,7 +73,7 @@ export default function LoginPage() {
 
     try {
       const res = await api.auth.sendOtp({ email: cleanId, purpose: "login" });
-      setSuccessMsg(res.message || "Verification code sent to your email.");
+      setSuccessMsg("Verification code sent to your email. Please check your inbox.");
       setOtpSent(true);
       setCooldown(60);
     } catch (err: any) {

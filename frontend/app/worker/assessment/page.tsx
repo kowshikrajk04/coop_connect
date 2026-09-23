@@ -227,26 +227,20 @@ function AssessmentContent() {
     if (activeAudioRef.current) {
       try {
         activeAudioRef.current.pause();
-        activeAudioRef.current.currentTime = 0;
+        activeAudioRef.current.src = "";
       } catch (e) {}
       activeAudioRef.current = null;
     }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch (e) {}
+      try { window.speechSynthesis.cancel(); } catch (e) {}
     }
     setIsSpeaking(false);
   };
 
   // =========================================================================
-  // 2. BROWSER-NATIVE speakQuestion
-  // - Uses window.speechSynthesis & SpeechSynthesisUtterance directly
-  // - Triggered from user interaction to satisfy browser autoplay restrictions
-  // - Cancels previous speech before starting a new utterance
-  // - Sets appropriate language, rate (0.95), pitch (1.0), volume (1.0)
-  // - Gracefully falls back if native voice unavailable so sound is audible
-  // - Handles asynchronous voice loading
+  // 2. BACKEND NEURAL TTS (primary) → Browser SpeechSynthesis (fallback)
+  // Uses /api/assessment/tts for Tamil, Hindi, Telugu etc. — Microsoft Neural voices
+  // Falls back to browser speechSynthesis only if backend TTS fails
   // =========================================================================
   const speakQuestion = (
     text: string,
@@ -262,33 +256,51 @@ function AssessmentContent() {
     setIsSpeaking(true);
     if (callbacks?.onStart) callbacks.onStart();
 
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+    const ttsUrl = `${API_BASE}/api/assessment/tts?text=${encodeURIComponent(text.trim())}&lang=${langCode}`;
+
+    const audio = new Audio(ttsUrl);
+    activeAudioRef.current = audio;
+
+    audio.onended = () => {
+      setIsSpeaking(false);
+      activeAudioRef.current = null;
+      if (callbacks?.onEnd) callbacks.onEnd();
+    };
+
+    audio.onerror = () => {
+      // Backend TTS failed — fall back to browser speech synthesis
+      activeAudioRef.current = null;
+      const textToSpeak = fallbackText || text;
+      _browserSpeak(textToSpeak, langCode, callbacks);
+    };
+
+    audio.play().catch(() => {
+      // Autoplay blocked or error — fall back
+      activeAudioRef.current = null;
+      const textToSpeak = fallbackText || text;
+      _browserSpeak(textToSpeak, langCode, callbacks);
+    });
+  };
+
+  // Browser SpeechSynthesis fallback
+  const _browserSpeak = (
+    text: string,
+    langCode: string,
+    callbacks?: { onStart?: () => void; onEnd?: () => void; onError?: (err: any) => void }
+  ) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
       setIsSpeaking(false);
       if (callbacks?.onEnd) callbacks.onEnd();
       return;
     }
-
     try {
-      // 1. Cancel previous speech immediately
       window.speechSynthesis.cancel();
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-      }
-
-      // 2. Resolve available voices dynamically
       const currentVoices = window.speechSynthesis.getVoices();
-      const list = (currentVoices && currentVoices.length > 0) ? currentVoices : voices;
+      const list = currentVoices.length > 0 ? currentVoices : voices;
       const resolved = resolveVoice(langCode, list);
 
-      // 3. Fallback text handling for English-only OS voices
-      // If native voice is not installed on OS, English voices cannot pronounce
-      // Tamil Unicode characters (they emit silence/0-bytes). Use fallback text
-      // so audible sound is reliably produced.
-      const textToSpeak = (resolved.isNative || !fallbackText) ? text : fallbackText;
-
-      const utterance = new SpeechSynthesisUtterance(textToSpeak);
-
-      // Prevent Chrome GC bug by retaining active references
+      const utterance = new SpeechSynthesisUtterance(text);
       activeUtteranceRef.current = utterance;
       (window as any).__activeUtterance = utterance;
 
@@ -297,64 +309,33 @@ function AssessmentContent() {
         utterance.lang = resolved.lang;
       } else {
         const target = LANGUAGES.find((l) => l.code === langCode);
-        utterance.lang = target ? target.speechCode : (langCode === "ta" ? "ta-IN" : "en-IN");
+        utterance.lang = target ? target.speechCode : "en-IN";
       }
-
-      utterance.rate = 0.95;
+      utterance.rate = 0.92;
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
 
-      let hasEnded = false;
+      let ended = false;
       const finish = () => {
-        if (hasEnded) return;
-        hasEnded = true;
+        if (ended) return;
+        ended = true;
         setIsSpeaking(false);
         activeUtteranceRef.current = null;
         if (callbacks?.onEnd) callbacks.onEnd();
       };
-
-      utterance.onstart = () => {
-        setIsSpeaking(true);
-        if (callbacks?.onStart) callbacks.onStart();
-      };
-
-      utterance.onend = () => {
-        finish();
-      };
-
+      utterance.onend = finish;
       utterance.onerror = (e) => {
-        if (e.error !== "canceled" && e.error !== "interrupted") {
-          console.warn("SpeechSynthesis notice:", e);
-          if (callbacks?.onError) callbacks.onError(e);
-        }
+        if (callbacks?.onError) callbacks.onError(e);
         finish();
       };
 
-      // Watchdog safety timer
-      const maxDuration = Math.min(20000, Math.max(3000, textToSpeak.length * 90));
-      const watchdog = setTimeout(() => {
-        if (!hasEnded) {
-          finish();
-        }
-      }, maxDuration);
-
+      const watchdog = setTimeout(finish, Math.min(20000, Math.max(3000, text.length * 90)));
       utterance.addEventListener("end", () => clearTimeout(watchdog), { once: true });
-      utterance.addEventListener("error", () => clearTimeout(watchdog), { once: true });
 
-      // Small 25ms timeout allows Chrome's speech synthesis engine to clear cancelled utterances
       setTimeout(() => {
-        try {
-          if (window.speechSynthesis.paused) {
-            window.speechSynthesis.resume();
-          }
-          window.speechSynthesis.speak(utterance);
-        } catch (err) {
-          console.warn("SpeechSynthesis.speak notice:", err);
-          finish();
-        }
+        try { window.speechSynthesis.speak(utterance); } catch { finish(); }
       }, 25);
-    } catch (err) {
-      console.warn("SpeechSynthesis error:", err);
+    } catch {
       setIsSpeaking(false);
       if (callbacks?.onEnd) callbacks.onEnd();
     }

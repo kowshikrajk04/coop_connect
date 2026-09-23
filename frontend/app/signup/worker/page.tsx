@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { 
   Wrench, CheckCircle2, ArrowRight, ArrowLeft, Mic, MicOff, 
-  Volume2, AlertCircle, FileText, Upload, ShieldAlert, Award, ShieldCheck
+  Volume2, AlertCircle, FileText, Upload, ShieldAlert, Award, ShieldCheck,
+  MapPin, Loader2
 } from "lucide-react";
 import { api, setAuthData } from "@/lib/api";
 import DocumentUpload from "@/components/DocumentUpload";
+import { useCurrentLocation } from "@/lib/useCurrentLocation";
 
 const TRADE_LIST = [
   "Electrician",
@@ -58,6 +60,7 @@ export default function WorkerSignupPage() {
   // Status
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+  const { isLocating, detect: detectLocation } = useCurrentLocation();
   const [isLoading, setIsLoading] = useState(false);
   const [workerToken, setWorkerToken] = useState<string | null>(null);
 
@@ -89,7 +92,7 @@ export default function WorkerSignupPage() {
     setOtpLoading(true);
     try {
       const res = await api.auth.sendOtp({ email, mobile });
-      setSuccessMsg(res.message || "OTP sent successfully to your email.");
+      setSuccessMsg("Verification code sent to your email. Please check your inbox.");
       setOtpSent(true);
       setCooldown(60);
     } catch (err: any) {
@@ -106,7 +109,7 @@ export default function WorkerSignupPage() {
     setOtpLoading(true);
     try {
       const res = await api.auth.verifyOtp({ email, mobile }, otpCode);
-      setSuccessMsg(res.message || "Email verified successfully.");
+      setSuccessMsg("Email verified successfully.");
       setOtpVerified(true);
     } catch (err: any) {
       setErrorMsg(err.message || "Invalid or expired OTP code.");
@@ -490,14 +493,25 @@ export default function WorkerSignupPage() {
               <label className="block text-sm font-semibold text-gray-700 mb-1">
                 Residential Address <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
-                required
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="e.g. House No. 42, Gali 3, Lajpat Nagar IV, New Delhi"
-                className="w-full px-4 py-2.5 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-500 text-sm"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  required
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="e.g. House No. 42, Gali 3, Lajpat Nagar IV, New Delhi"
+                  className="w-full px-4 py-2.5 pr-36 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-500 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => detectLocation((addr) => setAddress(addr))}
+                  disabled={isLocating}
+                  className="absolute right-1.5 top-1.5 bottom-1.5 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-[11px] font-semibold flex items-center gap-1.5 transition disabled:opacity-60"
+                >
+                  {isLocating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
+                  <span>{isLocating ? "Detecting..." : "Use My Location"}</span>
+                </button>
+              </div>
             </div>
 
             <button

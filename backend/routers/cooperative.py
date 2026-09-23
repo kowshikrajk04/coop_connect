@@ -12,24 +12,46 @@ def get_cooperative_dashboard(user: models.User = Depends(get_current_user), db:
     if user.role != "COOPERATIVE":
         raise HTTPException(status_code=403, detail="Cooperative management access required.")
 
-    total_workers = db.query(models.Worker).count()
+    coop_id = user.cooperative.id if user.cooperative else None
+
+    # Scope all counts to this cooperative's workers and bookings
+    total_workers = db.query(models.Worker).filter(
+        models.Worker.cooperative_id == coop_id
+    ).count() if coop_id else 0
+
     available_workers = db.query(models.Worker).filter(
+        models.Worker.cooperative_id == coop_id,
         models.Worker.status == "VERIFIED",
         models.Worker.is_available == True
-    ).count()
+    ).count() if coop_id else 0
+
     pending_workers = db.query(models.Worker).filter(
+        models.Worker.cooperative_id == coop_id,
         models.Worker.status == "PENDING_VERIFICATION"
-    ).count()
+    ).count() if coop_id else 0
 
-    total_bookings = db.query(models.Booking).count()
-    completed_bookings = db.query(models.Booking).filter(models.Booking.status == "COMPLETED").count()
+    total_bookings = db.query(models.Booking).filter(
+        models.Booking.cooperative_id == coop_id
+    ).count() if coop_id else 0
 
-    # Revenue and Welfare
-    paid_payments = db.query(models.Payment).filter(models.Payment.status == "PAID").all()
-    coop_revenue = sum(p.coop_fee for p in paid_payments)
-    total_welfare = sum(p.welfare_contribution for p in paid_payments)
+    completed_bookings = db.query(models.Booking).filter(
+        models.Booking.cooperative_id == coop_id,
+        models.Booking.status == "COMPLETED"
+    ).count() if coop_id else 0
 
-    coop_id = user.cooperative.id if user.cooperative else None
+    # Revenue and Welfare scoped to this cooperative's bookings
+    coop_revenue = 0.0
+    total_welfare = 0.0
+    if coop_id:
+        paid_payments = db.query(models.Payment).join(
+            models.Booking, models.Payment.booking_id == models.Booking.id
+        ).filter(
+            models.Booking.cooperative_id == coop_id,
+            models.Payment.status == "PAID"
+        ).all()
+        coop_revenue = sum(p.coop_fee for p in paid_payments)
+        total_welfare = sum(p.welfare_contribution for p in paid_payments)
+
     pending_membership_requests = 0
     if coop_id:
         pending_membership_requests = db.query(models.CooperativeMembership).filter(
@@ -57,9 +79,15 @@ def get_cooperative_workers(
     if user.role != "COOPERATIVE":
         raise HTTPException(status_code=403, detail="Cooperative management access required.")
 
-    query = db.query(models.Worker)
-    if status_filter != "ALL":
-        query = query.filter(models.Worker.status == status_filter)
+    coop_id = user.cooperative.id if user.cooperative else -1
+    # PENDING_VERIFICATION workers may not yet have a cooperative_id (they apply first, join later).
+    # Show all pending workers to any cooperative for review; for other statuses scope to own coop.
+    if status_filter == "PENDING_VERIFICATION":
+        query = db.query(models.Worker).filter(models.Worker.status == "PENDING_VERIFICATION")
+    else:
+        query = db.query(models.Worker).filter(models.Worker.cooperative_id == coop_id)
+        if status_filter != "ALL":
+            query = query.filter(models.Worker.status == status_filter)
 
     workers = query.order_by(models.Worker.created_at.desc()).all()
     res = []
@@ -155,6 +183,11 @@ def verify_worker(
         worker.rejection_reason = None
         for a in worker.assessments:
             a.status = "APPROVED"
+        # Auto-activate membership for this cooperative if worker has no active membership
+        if worker.membership_status != "ACTIVE":
+            worker.membership_status = "ACTIVE"
+            if not worker.cooperative_id and user.cooperative:
+                worker.cooperative_id = user.cooperative.id
         message = f"Congratulations! Your worker verification and AI Skill Assessment have been approved by the Cooperative. You are now eligible for customer job allocations."
         notif_type = "SUCCESS"
     elif action_data.action == "REJECT":

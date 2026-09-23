@@ -8,7 +8,7 @@ from database import engine, Base, get_db, check_db_connection
 import models
 from routers import (
     auth, customer, worker, cooperative, bookings, 
-    payments, demand_forecast, notifications, assessment, memberships, feedback
+    payments, demand_forecast, notifications, assessment, memberships, feedback, demo_data, complaints
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +31,9 @@ try:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ratings_customer_id ON ratings (customer_id);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ratings_stars ON ratings (stars);"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_ratings_created_at ON ratings (created_at);"))
+        # Ensure new booking statuses work (SQLite string-based, no ALTER needed; PostgreSQL same)
+        # Register complaint table if not exists (created by create_all above, but safe guard)
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bookings_cooperative_id ON bookings (cooperative_id);"))
         conn.commit()
     logger.info("CoopConnect database tables verified.")
 except Exception as e:
@@ -86,6 +89,8 @@ app.include_router(notifications.router)
 app.include_router(assessment.router)
 app.include_router(memberships.router)
 app.include_router(feedback.router)
+app.include_router(demo_data.router)
+app.include_router(complaints.router)
 
 @app.get("/")
 def root():

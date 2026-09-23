@@ -172,6 +172,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    markOnTheWay: (bookingId: number) =>
+      request(`/api/worker/jobs/${bookingId}/on_the_way`, { method: "POST" }),
+    markArrived: (bookingId: number) =>
+      request(`/api/worker/jobs/${bookingId}/arrived`, { method: "POST" }),
     getRoute: () => request("/api/worker/route-optimization"),
   },
   assessment: {
@@ -214,6 +218,8 @@ export const api = {
         body: JSON.stringify(bookingData),
       }),
     getDetails: (id: number) => request(`/api/bookings/${id}`),
+    reallocate: (id: number) => request(`/api/bookings/${id}/reallocate`, { method: "POST" }),
+    cancel: (id: number) => request(`/api/bookings/${id}/cancel`, { method: "POST" }),
   },
   payments: {
     getBreakdown: (bookingId: number) =>
@@ -240,6 +246,8 @@ export const api = {
       }),
     getInvoice: (bookingId: number) =>
       request(`/api/payments/invoice/${bookingId}`),
+    getQR: (bookingId: number) =>
+      request(`/api/payments/qr/${bookingId}`, { method: "POST" }),
     submitRating: (bookingId: number, stars: number, feedback?: string) =>
       request("/api/feedback", {
         method: "POST",
@@ -275,6 +283,21 @@ export const api = {
     getAll: () => request("/api/notifications"),
     markRead: (id: number) =>
       request(`/api/notifications/${id}/read`, { method: "POST" }),
+  },
+  complaints: {
+    raise: (bookingId: number, category: string, description: string) =>
+      request("/api/complaints", {
+        method: "POST",
+        body: JSON.stringify({ booking_id: bookingId, category, description }),
+      }),
+    getMy: () => request("/api/complaints/my"),
+    getCooperative: (status: string = "ALL") =>
+      request(`/api/complaints/cooperative?status_filter=${status}`),
+    resolve: (complaintId: number, resolution: string, status: string = "RESOLVED") =>
+      request(`/api/complaints/${complaintId}/resolve`, {
+        method: "PUT",
+        body: JSON.stringify({ resolution, status }),
+      }),
   },
   memberships: {
     getCooperatives: () => request("/api/memberships/cooperatives"),

@@ -12,10 +12,35 @@ router = APIRouter(prefix="/api/demo", tags=["demo"])
 def reset_to_empty_state(db: Session = Depends(get_db)):
     """
     Clears all application data, returning CoopConnect to its pristine initial empty state.
-    Provides standard empty platform states across all roles.
+    Uses DELETE statements instead of DROP/CREATE to avoid deadlocks on PostgreSQL.
     """
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    from sqlalchemy import inspect as sa_inspect
+    from database import engine as db_engine
+
+    # Determine if PostgreSQL or SQLite
+    dialect = db_engine.dialect.name
+
+    if dialect == "postgresql":
+        # Safe DELETE in FK-dependency order for PostgreSQL (Neon doesn't allow session_replication_role)
+        from sqlalchemy import text as _text
+        tables = [
+            "complaints", "cooperative_memberships", "demand_forecasts", "otp_verifications",
+            "notifications", "ratings", "welfare_transactions", "invoices",
+            "payment_transactions", "payments", "worker_allocations", "bookings",
+            "skill_assessments", "worker_skills", "worker_verifications",
+            "workers", "customers", "cooperatives", "services", "users"
+        ]
+        with db_engine.connect() as conn:
+            for t in tables:
+                try:
+                    conn.execute(_text(f"DELETE FROM {t};"))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+    else:
+        # SQLite: safe to drop and recreate
+        Base.metadata.drop_all(bind=db_engine)
+        Base.metadata.create_all(bind=db_engine)
 
     # Re-create a single master Cooperative account so the system is ready for initial login/testing
     admin_user = models.User(
@@ -32,14 +57,14 @@ def reset_to_empty_state(db: Session = Depends(get_db)):
 
     coop = models.Cooperative(
         user_id=admin_user.id,
-        name="Delhi Shramik Sahakari Samiti (Regd.)",
+        name="Coimbatore Thozhilalar Sahakari Sangam (Regd.)",
         registration_number="DEL-COOP-2024-8842",
         contact_person="Ramesh Sharma",
         mobile="9876543210",
         email="cooperative@delhi.gov.in",
-        address="Sahakar Bhavan, Sector 12, RK Puram, New Delhi",
+        address="No. 5, Avinashi Road, Coimbatore, Tamil Nadu 641014",
         status="APPROVED",
-        service_fee_pct=5.0,
+        service_fee_pct=10.0,
         welfare_pct=5.0
     )
     db.add(coop)
@@ -57,48 +82,73 @@ def seed_demo_data(db: Session = Depends(get_db)):
     Populates registered workers across all 10 trades, realistic customer requests,
     allocation metrics, welfare transactions, and historical data for demand forecasting.
     """
-    # First reset to empty
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    # First reset to empty (safe for both SQLite and PostgreSQL)
+    from sqlalchemy import text as _text
+    from database import engine as db_engine
+    dialect = db_engine.dialect.name
 
-    # 1. Cooperative
-    coop_user = models.User(
-        email="cooperative@delhi.gov.in",
-        mobile="9876543210",
-        hashed_password=hash_password("CoopPass123!"),
-        role="COOPERATIVE",
-        is_active=True,
-        otp_verified=True
-    )
-    db.add(coop_user)
-    db.commit()
-    db.refresh(coop_user)
+    if dialect == "postgresql":
+        tables = [
+            "complaints", "cooperative_memberships", "demand_forecasts", "otp_verifications",
+            "notifications", "ratings", "welfare_transactions", "invoices",
+            "payment_transactions", "payments", "worker_allocations", "bookings",
+            "skill_assessments", "worker_skills", "worker_verifications",
+            "workers", "customers", "cooperatives", "services", "users"
+        ]
+        with db_engine.connect() as conn:
+            for t in tables:
+                try:
+                    conn.execute(_text(f"DELETE FROM {t};"))
+                except Exception:
+                    conn.rollback()
+            conn.commit()
+    else:
+        Base.metadata.drop_all(bind=db_engine)
+        Base.metadata.create_all(bind=db_engine)
 
-    coop = models.Cooperative(
-        user_id=coop_user.id,
-        name="Delhi Shramik Sahakari Samiti (Regd.)",
-        registration_number="DEL-COOP-2024-8842",
-        contact_person="Ramesh Sharma",
-        mobile="9876543210",
-        email="cooperative@delhi.gov.in",
-        address="Sahakar Bhavan, Sector 12, RK Puram, New Delhi",
-        status="APPROVED",
-        service_fee_pct=5.0,
-        welfare_pct=5.0,
-        reserve_pct=40.0,
-        training_pct=25.0,
-        emergency_pct=20.0,
-        pension_pct=15.0
-    )
-    db.add(coop)
-    db.commit()
-    db.refresh(coop)
+    # 1. Cooperative — reuse existing account if it exists (preserves JWT tokens in test flows)
+    from sqlalchemy import text as _sql_text
+    coop_user = db.query(models.User).filter(models.User.email == "cooperative@delhi.gov.in").first()
+    if not coop_user:
+        coop_user = models.User(
+            email="cooperative@delhi.gov.in",
+            mobile="9876543210",
+            hashed_password=hash_password("CoopPass123!"),
+            role="COOPERATIVE",
+            is_active=True,
+            otp_verified=True
+        )
+        db.add(coop_user)
+        db.commit()
+        db.refresh(coop_user)
 
-    # 2. Customers
+    coop = db.query(models.Cooperative).filter(models.Cooperative.user_id == coop_user.id).first()
+    if not coop:
+        coop = models.Cooperative(
+            user_id=coop_user.id,
+            name="Coimbatore Thozhilalar Sahakari Sangam (Regd.)",
+            registration_number="DEL-COOP-2024-8842",
+            contact_person="Ramesh Sharma",
+            mobile="9876543210",
+            email="cooperative@delhi.gov.in",
+            address="No. 5, Avinashi Road, Coimbatore, Tamil Nadu 641014",
+            status="APPROVED",
+            service_fee_pct=5.0,
+            welfare_pct=5.0,
+            reserve_pct=40.0,
+            training_pct=25.0,
+            emergency_pct=20.0,
+            pension_pct=15.0
+        )
+        db.add(coop)
+        db.commit()
+        db.refresh(coop)
+
+    # 2. Customers — Coimbatore locations
     cust_data = [
-        {"name": "Ananya Roy", "email": "customer@demo.com", "mobile": "9811122233", "addr": "B-402, Green Park Extension, New Delhi", "lat": 28.5588, "lng": 77.2045},
-        {"name": "Vikram Malhotra", "email": "vikram@demo.com", "mobile": "9822233344", "addr": "C-12, Hauz Khas Enclave, New Delhi", "lat": 28.5494, "lng": 77.2001},
-        {"name": "Sunita Rao", "email": "sunita@demo.com", "mobile": "9833344455", "addr": "Flat 108, Vasant Kunj Sector C, New Delhi", "lat": 28.5284, "lng": 77.1558}
+        {"name": "Ananya Roy", "email": "customer@demo.com", "mobile": "9811122233", "addr": "42, Avinashi Road, Peelamedu, Coimbatore", "lat": 11.0230, "lng": 77.0200},
+        {"name": "Vikram Malhotra", "email": "vikram@demo.com", "mobile": "9822233344", "addr": "15, RS Puram, Coimbatore", "lat": 11.0050, "lng": 76.9550},
+        {"name": "Sunita Rao", "email": "sunita@demo.com", "mobile": "9833344455", "addr": "8, Saibaba Colony, Coimbatore", "lat": 11.0180, "lng": 76.9650}
     ]
     created_customers = []
     for cd in cust_data:
@@ -119,55 +169,55 @@ def seed_demo_data(db: Session = Depends(get_db)):
         db.refresh(c)
         created_customers.append(c)
 
-    # 3. Workers across trades with varying opportunity scores to test fairness allocation
+    # 3. Workers — Coimbatore locations
     workers_spec = [
         {
             "name": "Rajesh Kumar", "email": "worker@demo.com", "mobile": "9844455566",
             "trade": "Electrician", "exp": 8, "score": 92.0, "status": "VERIFIED",
-            "lat": 28.5600, "lng": 77.2050, "jobs": 14, "active": 0, "opp": 35.0,
-            "rating": 4.9, "addr": "Safdarjung Enclave, New Delhi"
+            "lat": 11.0168, "lng": 76.9558, "jobs": 14, "active": 0, "opp": 35.0,
+            "rating": 4.9, "addr": "Gandhipuram, Coimbatore"
         },
         {
             "name": "Suresh Paswan", "email": "suresh@demo.com", "mobile": "9855566677",
             "trade": "Electrician", "exp": 4, "score": 85.0, "status": "VERIFIED",
-            "lat": 28.5620, "lng": 77.2100, "jobs": 3, "active": 0, "opp": 88.0,  # High opportunity need!
-            "rating": 4.8, "addr": "Yusuf Sarai, New Delhi"
+            "lat": 11.0250, "lng": 76.9620, "jobs": 3, "active": 0, "opp": 88.0,
+            "rating": 4.8, "addr": "Peelamedu, Coimbatore"
         },
         {
             "name": "Manoj Verma", "email": "manoj@demo.com", "mobile": "9866677788",
             "trade": "Plumber", "exp": 6, "score": 88.0, "status": "VERIFIED",
-            "lat": 28.5520, "lng": 77.1980, "jobs": 11, "active": 1, "opp": 40.0,
-            "rating": 4.7, "addr": "Hauz Khas Market, New Delhi"
+            "lat": 11.0050, "lng": 76.9480, "jobs": 11, "active": 1, "opp": 40.0,
+            "rating": 4.7, "addr": "RS Puram, Coimbatore"
         },
         {
             "name": "Amit Bind", "email": "amit@demo.com", "mobile": "9877788899",
             "trade": "Plumber", "exp": 3, "score": 82.0, "status": "VERIFIED",
-            "lat": 28.5540, "lng": 77.2020, "jobs": 2, "active": 0, "opp": 92.0,  # High opportunity need!
-            "rating": 4.9, "addr": "Green Park Main, New Delhi"
+            "lat": 11.0120, "lng": 76.9700, "jobs": 2, "active": 0, "opp": 92.0,
+            "rating": 4.9, "addr": "Saibaba Colony, Coimbatore"
         },
         {
             "name": "Dinesh Sharma", "email": "dinesh@demo.com", "mobile": "9888899900",
             "trade": "Carpenter", "exp": 10, "score": 90.0, "status": "VERIFIED",
-            "lat": 28.5450, "lng": 77.2050, "jobs": 8, "active": 0, "opp": 55.0,
-            "rating": 4.8, "addr": "Malviya Nagar, New Delhi"
+            "lat": 10.9980, "lng": 76.9600, "jobs": 8, "active": 0, "opp": 55.0,
+            "rating": 4.8, "addr": "Singanallur, Coimbatore"
         },
         {
             "name": "Pooja Kumari", "email": "pooja@demo.com", "mobile": "9899900011",
             "trade": "Cleaner", "exp": 5, "score": 88.0, "status": "VERIFIED",
-            "lat": 28.5300, "lng": 77.1600, "jobs": 16, "active": 0, "opp": 30.0,
-            "rating": 4.9, "addr": "Vasant Kunj, New Delhi"
+            "lat": 11.0300, "lng": 76.9400, "jobs": 16, "active": 0, "opp": 30.0,
+            "rating": 4.9, "addr": "Vadavalli, Coimbatore"
         },
         {
             "name": "Kavita Devi", "email": "kavita@demo.com", "mobile": "9800011122",
             "trade": "Domestic Helper", "exp": 7, "score": 86.0, "status": "VERIFIED",
-            "lat": 28.5350, "lng": 77.1650, "jobs": 9, "active": 0, "opp": 50.0,
-            "rating": 4.8, "addr": "Masoodpur, Vasant Kunj"
+            "lat": 11.0090, "lng": 76.9800, "jobs": 9, "active": 0, "opp": 50.0,
+            "rating": 4.8, "addr": "Ukkadam, Coimbatore"
         },
         {
             "name": "Santosh Yadav", "email": "santosh@demo.com", "mobile": "9812345678",
-            "trade": "Painter", "exp": 5, "score": 84.0, "status": "PENDING_VERIFICATION",  # Pending cooperative approval!
-            "lat": 28.5400, "lng": 77.1800, "jobs": 0, "active": 0, "opp": 100.0,
-            "rating": 5.0, "addr": "Munirka Village, New Delhi"
+            "trade": "Painter", "exp": 5, "score": 84.0, "status": "PENDING_VERIFICATION",
+            "lat": 11.0200, "lng": 76.9500, "jobs": 0, "active": 0, "opp": 100.0,
+            "rating": 5.0, "addr": "Tatabad, Coimbatore"
         }
     ]
 

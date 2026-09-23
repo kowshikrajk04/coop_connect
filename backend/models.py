@@ -30,8 +30,8 @@ class Customer(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     full_name = Column(String, nullable=False)
     address = Column(String, nullable=False)
-    latitude = Column(Float, default=28.6139)
-    longitude = Column(Float, default=77.2090)
+    latitude = Column(Float, default=11.0168)
+    longitude = Column(Float, default=76.9558)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     user = relationship("User", back_populates="customer")
@@ -78,8 +78,8 @@ class Worker(Base):
     email = Column(String, nullable=False)
     dob = Column(String, nullable=True)
     address = Column(String, nullable=False)
-    latitude = Column(Float, default=28.6139)
-    longitude = Column(Float, default=77.2090)
+    latitude = Column(Float, default=11.0168)
+    longitude = Column(Float, default=76.9558)
     profile_photo = Column(String, nullable=True)
     id_document_url = Column(String, nullable=True)
     cert_document_url = Column(String, nullable=True)
@@ -152,8 +152,8 @@ class Booking(Base):
     scheduled_date = Column(String, nullable=False)
     scheduled_time = Column(String, nullable=False)
     customer_address = Column(String, nullable=False)
-    customer_lat = Column(Float, default=28.6139)
-    customer_lng = Column(Float, default=77.2090)
+    customer_lat = Column(Float, default=11.0168)
+    customer_lng = Column(Float, default=76.9558)
     service_photo_url = Column(String, nullable=True)
     status = Column(String, default="REQUESTED")  # REQUESTED, ALLOCATED, ACCEPTED, IN_PROGRESS, COMPLETED, CANCELLED
     payment_status = Column(String, default="PENDING")  # PENDING, PAID
@@ -377,3 +377,22 @@ class CooperativeMembership(Base):
     cooperative = relationship("Cooperative", back_populates="memberships")
 
 
+
+
+class Complaint(Base):
+    __tablename__ = "complaints"
+
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False, index=True)
+    raised_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # CATEGORY: WORKER_DID_NOT_ARRIVE, CUSTOMER_UNAVAILABLE, PAYMENT_ISSUE,
+    #           SERVICE_QUALITY, WRONG_SERVICE, CANCELLATION_ISSUE, OTHER
+    category = Column(String, nullable=False, default="OTHER")
+    description = Column(Text, nullable=False)
+    # STATUS: OPEN, UNDER_REVIEW, RESOLVED, CLOSED
+    status = Column(String, default="OPEN", index=True)
+    resolution = Column(Text, nullable=True)
+    resolved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    resolved_at = Column(DateTime, nullable=True)

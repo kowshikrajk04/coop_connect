@@ -185,7 +185,7 @@ def submit_skill_assessment(
         worker_id=user.worker.id,
         skill_name=req.skill_name,
         score=req.score,
-        passed=req.passed,
+        passed=req.score >= 60,
         language=req.language,
         answers_json=req.answers_json,
         voice_transcript=req.voice_transcript,
@@ -257,6 +257,8 @@ def get_worker_jobs(user: models.User = Depends(get_current_user), db: Session =
                 "scheduled_date": b.scheduled_date,
                 "scheduled_time": b.scheduled_time,
                 "customer_address": b.customer_address,
+                "customer_lat": b.customer_lat,
+                "customer_lng": b.customer_lng,
                 "customer_name": b.customer.full_name if b.customer else "Customer",
                 "customer_mobile": b.customer.user.mobile if b.customer and b.customer.user else "",
                 "distance_km": dist,
@@ -296,7 +298,7 @@ def get_worker_jobs(user: models.User = Depends(get_current_user), db: Session =
             "created_at": b.created_at.isoformat(),
             "payout": b.payment.worker_payout if b.payment else round(b.total_amount * 0.9, 2)
         }
-        if b.status in ["ACCEPTED", "IN_PROGRESS"]:
+        if b.status in ["ACCEPTED", "ON_THE_WAY", "ARRIVED", "IN_PROGRESS"]:
             active_jobs.append(job_item)
         elif b.status == "COMPLETED":
             completed_jobs.append(job_item)
@@ -345,6 +347,11 @@ def reject_job(booking_id: int, user: models.User = Depends(get_current_user), d
     if user.role != "WORKER" or not user.worker:
         raise HTTPException(status_code=403, detail="Worker access required.")
 
+    booking = db.query(models.Booking).filter(models.Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+
+    # Mark this worker's allocation as REJECTED
     allocation = db.query(models.WorkerAllocation).filter(
         models.WorkerAllocation.booking_id == booking_id,
         models.WorkerAllocation.worker_id == user.worker.id
@@ -353,7 +360,157 @@ def reject_job(booking_id: int, user: models.User = Depends(get_current_user), d
         allocation.status = "REJECTED"
         db.commit()
 
-    return {"success": True, "message": "Job rejected."}
+    # --- RE-ALLOCATION: find next eligible worker ---
+    from sqlalchemy.orm import joinedload
+    from ml.fairness_allocator import allocator, calculate_distance_km as _dist_km
+
+    # Collect IDs of workers already offered/rejected for this booking
+    already_tried = db.query(models.WorkerAllocation.worker_id).filter(
+        models.WorkerAllocation.booking_id == booking_id
+    ).all()
+    excluded_ids = {row[0] for row in already_tried}
+
+    candidates = db.query(models.Worker).options(
+        joinedload(models.Worker.skills),
+        joinedload(models.Worker.assessments)
+    ).filter(
+        models.Worker.status == "VERIFIED",
+        models.Worker.membership_status == "ACTIVE",
+        models.Worker.id.notin_(excluded_ids)
+    ).all()
+
+    worker_dicts = []
+    for w in candidates:
+        skills = [{"skill_name": s.skill_name, "years_experience": s.years_experience} for s in w.skills]
+        assessments = [{"skill_name": a.skill_name, "score": a.score} for a in w.assessments]
+        worker_dicts.append({
+            "id": w.id, "full_name": w.full_name, "mobile": w.mobile,
+            "status": w.status, "is_available": w.is_available,
+            "latitude": w.latitude, "longitude": w.longitude,
+            "rating": w.rating, "total_jobs": w.total_jobs,
+            "completed_jobs": w.completed_jobs, "active_jobs": w.active_jobs,
+            "skills": skills, "assessments": assessments
+        })
+
+    ranked = allocator.rank_workers(
+        service_type=booking.service_type,
+        customer_lat=booking.customer_lat,
+        customer_lng=booking.customer_lng,
+        candidate_workers=worker_dicts,
+        is_emergency=booking.is_emergency,
+        emergency_priority=booking.emergency_priority
+    )
+
+    if ranked:
+        top = ranked[0]
+        next_worker = db.query(models.Worker).filter(models.Worker.id == top["worker_id"]).first()
+        booking.worker_id = next_worker.id
+        booking.cooperative_id = next_worker.cooperative_id
+        booking.status = "ALLOCATED"
+
+        db.add(models.WorkerAllocation(
+            booking_id=booking.id,
+            worker_id=next_worker.id,
+            suitability_score=top["suitability_score"],
+            skill_score=top["skill_score"],
+            success_score=top["success_score"],
+            availability_score=top["availability_score"],
+            distance_score=top["distance_score"],
+            rating_score=top["rating_score"],
+            fairness_factor=top["fairness_factor"],
+            status="OFFERED"
+        ))
+
+        # Notify new worker
+        db.add(models.Notification(
+            user_id=next_worker.user_id,
+            title=f"New Job Opportunity: {booking.service_type}",
+            message=f"You have been allocated booking #{booking.booking_number} at {booking.customer_address}.",
+            type="INFO"
+        ))
+        # Notify customer of reallocation
+        if booking.customer:
+            db.add(models.Notification(
+                user_id=booking.customer.user_id,
+                title="Worker Reassigned",
+                message=f"Your previous worker was unavailable. {next_worker.full_name} has been matched to your booking.",
+                type="INFO"
+            ))
+        db.commit()
+        return {"success": True, "message": "Job rejected. Booking reallocated to next eligible worker.", "reallocated": True}
+    else:
+        # No other worker available — reset booking to REQUESTED
+        booking.worker_id = None
+        booking.cooperative_id = None
+        booking.status = "REQUESTED"
+        if booking.customer:
+            db.add(models.Notification(
+                user_id=booking.customer.user_id,
+                title="Searching for Worker",
+                message="Your previous worker was unavailable. We are searching for another verified worker for your booking.",
+                type="INFO"
+            ))
+        db.commit()
+        return {"success": True, "message": "Job rejected. No other workers available right now. Booking reset to searching.", "reallocated": False}
+
+
+@router.post("/jobs/{booking_id}/on_the_way")
+def mark_on_the_way(booking_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role != "WORKER" or not user.worker:
+        raise HTTPException(status_code=403, detail="Worker access required.")
+
+    booking = db.query(models.Booking).filter(
+        models.Booking.id == booking_id,
+        models.Booking.worker_id == user.worker.id
+    ).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    if booking.status != "ACCEPTED":
+        raise HTTPException(status_code=400, detail=f"Cannot mark On The Way from status '{booking.status}'. Job must be ACCEPTED first.")
+
+    booking.status = "ON_THE_WAY"
+    db.commit()
+
+    if booking.customer:
+        db.add(models.Notification(
+            user_id=booking.customer.user_id,
+            title="Worker On The Way",
+            message=f"{user.worker.full_name} is on the way to your location for {booking.service_type}.",
+            type="INFO"
+        ))
+        db.commit()
+
+    return {"success": True, "message": "Status updated: On The Way.", "status": "ON_THE_WAY"}
+
+
+@router.post("/jobs/{booking_id}/arrived")
+def mark_arrived(booking_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role != "WORKER" or not user.worker:
+        raise HTTPException(status_code=403, detail="Worker access required.")
+
+    booking = db.query(models.Booking).filter(
+        models.Booking.id == booking_id,
+        models.Booking.worker_id == user.worker.id
+    ).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    if booking.status != "ON_THE_WAY":
+        raise HTTPException(status_code=400, detail=f"Cannot mark Arrived from status '{booking.status}'. Must be ON_THE_WAY first.")
+
+    booking.status = "ARRIVED"
+    db.commit()
+
+    if booking.customer:
+        db.add(models.Notification(
+            user_id=booking.customer.user_id,
+            title="Worker Arrived",
+            message=f"{user.worker.full_name} has arrived at your location and is ready to begin {booking.service_type}.",
+            type="SUCCESS"
+        ))
+        db.commit()
+
+    return {"success": True, "message": "Status updated: Arrived.", "status": "ARRIVED"}
+
 
 @router.post("/jobs/{booking_id}/start")
 def start_job(booking_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -367,6 +524,10 @@ def start_job(booking_id: int, user: models.User = Depends(get_current_user), db
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found.")
 
+    # Allow starting from ACCEPTED, ON_THE_WAY, or ARRIVED
+    if booking.status not in ("ACCEPTED", "ON_THE_WAY", "ARRIVED"):
+        raise HTTPException(status_code=400, detail=f"Cannot start service from status '{booking.status}'.")
+
     booking.status = "IN_PROGRESS"
     db.commit()
 
@@ -374,12 +535,12 @@ def start_job(booking_id: int, user: models.User = Depends(get_current_user), db
         db.add(models.Notification(
             user_id=booking.customer.user_id,
             title="Service Started",
-            message=f"{user.worker.full_name} has arrived and started the service.",
+            message=f"{user.worker.full_name} has started the {booking.service_type} service at your location.",
             type="INFO"
         ))
         db.commit()
 
-    return {"success": True, "message": "Service marked as In Progress."}
+    return {"success": True, "message": "Service marked as In Progress.", "status": "IN_PROGRESS"}
 
 @router.post("/jobs/{booking_id}/complete")
 def complete_job(
@@ -421,7 +582,9 @@ def complete_job(
 
     coop_fee = round(service_amount * (coop_fee_pct / 100.0), 2)
     welfare_contrib = round(service_amount * (welfare_pct / 100.0), 2)
-    worker_payout = round(service_amount - coop_fee - welfare_contrib, 2)
+    # Consistent with payments.py verify_payment: welfare is a SEPARATE cooperative contribution,
+    # NOT deducted from worker payout. Worker receives service_amount minus coop_fee only.
+    worker_payout = round(service_amount - coop_fee, 2)
 
     payment = models.Payment(
         booking_id=booking.id,
@@ -472,7 +635,7 @@ def get_optimized_route(user: models.User = Depends(get_current_user), db: Sessi
     # Get active/accepted jobs for today
     active_jobs = db.query(models.Booking).filter(
         models.Booking.worker_id == user.worker.id,
-        models.Booking.status.in_(["ACCEPTED", "IN_PROGRESS"])
+        models.Booking.status.in_(["ACCEPTED", "ON_THE_WAY", "ARRIVED", "IN_PROGRESS"])
     ).all()
 
     if not active_jobs:

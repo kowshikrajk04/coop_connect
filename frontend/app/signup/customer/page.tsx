@@ -3,8 +3,9 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Users, ArrowRight, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
+import { Users, ArrowRight, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw, MapPin, Loader2 } from "lucide-react";
 import { api, setAuthData } from "@/lib/api";
+import { useCurrentLocation } from "@/lib/useCurrentLocation";
 
 export default function CustomerSignupPage() {
   const router = useRouter();
@@ -16,6 +17,9 @@ export default function CustomerSignupPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [location, setLocation] = useState("");
+  const [locationLat, setLocationLat] = useState<number | null>(null);
+  const [locationLng, setLocationLng] = useState<number | null>(null);
+  const { isLocating, detect: detectLocation } = useCurrentLocation();
 
   // OTP state
   const [step, setStep] = useState<"FORM" | "OTP">("FORM");
@@ -58,7 +62,7 @@ export default function CustomerSignupPage() {
     setIsLoading(true);
     try {
       const otpRes = await api.auth.sendOtp({ email, mobile });
-      setSuccessMsg(otpRes.message || "Verification OTP sent to your email.");
+      setSuccessMsg("Verification code sent to your email. Please check your inbox.");
       setCooldown(60);
       setStep("OTP");
     } catch (err: any) {
@@ -75,7 +79,7 @@ export default function CustomerSignupPage() {
     setIsLoading(true);
     try {
       const res = await api.auth.sendOtp({ email, mobile });
-      setSuccessMsg(res.message || "A new OTP has been sent to your email.");
+      setSuccessMsg("A new verification code has been sent to your email.");
       setCooldown(60);
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to resend OTP. Please try again.");
@@ -188,14 +192,35 @@ export default function CustomerSignupPage() {
               <label className="block text-sm font-semibold text-gray-700 mb-1">
                 Home / Service Location <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
-                required
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="e.g. Flat 304, Palm Heights, Sector 14, Gurgaon"
-                className="w-full px-4 py-2.5 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  required
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="e.g. Flat 304, Palm Heights, Sector 14, Gurgaon"
+                  className="w-full px-4 py-2.5 pr-36 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => detectLocation((addr) => setLocation(addr), (lat, lng) => { setLocationLat(lat); setLocationLng(lng); })}
+                  disabled={isLocating}
+                  className="absolute right-1.5 top-1.5 bottom-1.5 px-3 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[11px] font-semibold flex items-center gap-1.5 transition disabled:opacity-60"
+                >
+                  {isLocating ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <MapPin className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isLocating ? "Detecting..." : "Use My Location"}</span>
+                </button>
+              </div>
+              {locationLat && locationLng && (
+                <p className="text-[11px] text-emerald-700 mt-1 flex items-center gap-1">
+                  <MapPin className="w-3 h-3" />
+                  Location detected — coordinates saved for accurate worker matching.
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

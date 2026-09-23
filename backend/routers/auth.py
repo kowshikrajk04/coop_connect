@@ -17,25 +17,93 @@ except ValueError:
     OTP_EXPIRY_SECONDS = 300
 
 
-def is_dummy_otp_mode_active() -> bool:
+def is_staging_universal_otp_active() -> bool:
     """
-    Checks if development dummy OTP mode is active.
-    Dynamically checks backend/.env and os.environ so changes in .env take effect immediately.
-    Strictly disabled in production environments.
+    Checks if universal dummy OTP (working for ANY email) is enabled.
+
+    STRICT SECURITY CONTROLS:
+    1. NEVER active in production. If ENVIRONMENT is 'production', 'prod', or 'live',
+       this function unconditionally returns False regardless of any other flag.
+    2. Requires ENVIRONMENT to be explicitly 'staging', 'demo', 'development', or 'test'.
+    3. Requires explicit opt-in flag STAGING_UNIVERSAL_DUMMY_OTP_ENABLED=true.
     """
-    env_name = os.getenv("ENVIRONMENT", os.getenv("ENV", "")).strip().lower()
+    env_name = os.getenv("ENVIRONMENT", os.getenv("ENV", "")).strip().strip("'\"").lower()
     if env_name in ("production", "prod", "live"):
         return False
-    if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID") or os.getenv("K_SERVICE") or os.getenv("AWS_EXECUTION_ENV"):
+
+    if env_name not in ("staging", "demo", "development", "test", "dev"):
         return False
 
-    # Reload backend/.env dynamically with override=True to guarantee fresh flag value
-    if env_path.exists():
+    raw_flag = os.getenv("STAGING_UNIVERSAL_DUMMY_OTP_ENABLED", "false")
+    return str(raw_flag).strip().strip("'\"").lower() in ("true", "1", "yes")
+
+
+def is_demo_otp_active_for_email(email: str) -> bool:
+    """
+    Checks if dummy OTP (123456) is permitted for the given email address.
+
+    Modes:
+    A. STAGING UNIVERSAL DEMO MODE:
+       - Enabled ONLY in staging/demo environments (ENVIRONMENT=staging, demo, dev, test).
+       - Requires STAGING_UNIVERSAL_DUMMY_OTP_ENABLED=true.
+       - STRICTLY BLOCKED in production.
+       - When active, accepts dummy OTP 123456 for ANY entered email address.
+
+    B. PRODUCTION RESTRICTED DEMO MODE:
+       - Active when DEMO_OTP_ENABLED=true.
+       - Requires explicit DEMO_OTP_EMAIL allowlist.
+       - ONLY permits dummy OTP for that exact allowlisted demo account.
+       - All other accounts unconditionally require real email OTP via SMTP.
+    """
+    if not email:
+        return False
+
+    clean_email = email.strip().strip("'\"").lower()
+
+    # In local development, dynamically reload backend/.env so changes take effect immediately.
+    # In cloud environments (e.g. Render), never override os.environ with filesystem files.
+    # Skip reload during automated tests so patch.dict() environment overrides are respected.
+    is_under_test = "pytest" in os.getenv("_", "") or "PYTEST_CURRENT_TEST" in os.environ
+    is_cloud_or_prod = (
+        os.getenv("ENVIRONMENT", os.getenv("ENV", "")).strip().lower() in ("production", "prod", "live")
+        or bool(os.getenv("RENDER"))
+        or bool(os.getenv("RENDER_SERVICE_ID"))
+        or bool(os.getenv("K_SERVICE"))
+        or bool(os.getenv("AWS_EXECUTION_ENV"))
+    )
+    if not is_under_test and not is_cloud_or_prod and env_path.exists():
         load_dotenv(dotenv_path=env_path, override=True)
 
-    raw = os.getenv("DEV_DUMMY_OTP_ENABLED", "false")
-    val = str(raw).strip().strip("'\"").lower()
-    return val in ("true", "1", "yes")
+    # 1. Staging Universal Demo Mode Check (strictly rejected if ENVIRONMENT is production)
+    if is_staging_universal_otp_active():
+        return True
+
+    # 2. Production / Cloud Restricted Allowlist Check
+    raw_enabled = os.getenv("DEMO_OTP_ENABLED", os.getenv("DEV_DUMMY_OTP_ENABLED", "false"))
+    val = str(raw_enabled).strip().strip("'\"").lower()
+    if val not in ("true", "1", "yes"):
+        return False
+
+    # 3. Allowlisted Demo Email check
+    allowlist_raw = os.getenv("DEMO_OTP_EMAIL", os.getenv("DEMO_ACCOUNT_EMAIL", "")).strip().strip("'\"").lower()
+    if not allowlist_raw:
+        if is_cloud_or_prod:
+            # In production or cloud environments, an explicit allowlist email is MANDATORY
+            return False
+        else:
+            # In local dev only, default to standard demo account
+            allowlist_raw = "customer@demo.com"
+
+    allowed_emails = [e.strip().strip("'\"").lower() for e in allowlist_raw.split(",") if e.strip()]
+    return clean_email in allowed_emails
+
+
+def is_dummy_otp_mode_active() -> bool:
+    """
+    Backwards-compatible helper. Returns True only if demo OTP is enabled and
+    the default demo account customer@demo.com is active.
+    """
+    return is_demo_otp_active_for_email("customer@demo.com")
 
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
@@ -136,8 +204,8 @@ async def register(request: Request, db: Session = Depends(get_db)):
             user_id=new_user.id,
             full_name=full_name,
             address=address,
-            latitude=28.6139,
-            longitude=77.2090
+            latitude=11.0168,
+            longitude=76.9558
         )
         db.add(customer)
     elif role.upper() == "WORKER":
@@ -148,8 +216,8 @@ async def register(request: Request, db: Session = Depends(get_db)):
             email=email,
             dob=dob,
             address=address,
-            latitude=28.6139 + (random.random() - 0.5) * 0.05,
-            longitude=77.2090 + (random.random() - 0.5) * 0.05,
+            latitude=11.0168 + (random.random() - 0.5) * 0.05,
+            longitude=76.9558 + (random.random() - 0.5) * 0.05,
             status="PENDING_VERIFICATION",
             membership_status="NOT_JOINED",
             is_available=True,
@@ -285,16 +353,15 @@ def login_with_otp(req: schemas.OTPLoginRequest, db: Session = Depends(get_db)):
         )
 
     submitted_otp = req.otp.strip()
-    dummy_active = is_dummy_otp_mode_active()
-    env_name = os.getenv("ENVIRONMENT", os.getenv("ENV", "")).strip().lower()
-    is_prod = env_name in ("production", "prod", "live") or bool(os.getenv("RENDER")) or bool(os.getenv("RENDER_SERVICE_ID"))
+    target_email = user.email or lookup_email
+    demo_active = is_demo_otp_active_for_email(target_email)
 
     is_match = False
-    if dummy_active and submitted_otp == "123456":
+    if demo_active and submitted_otp == "123456":
         is_match = True
-        logger.info("DEV_DUMMY_OTP_ENABLED: Login dummy OTP 123456 verified for user %s (%s).", user.id, user.email)
-    elif is_prod and submitted_otp == "123456":
-        # Strictly reject dummy OTP in production
+        logger.info("DEMO_OTP: Login demo OTP 123456 verified for allowlisted user %s (%s).", user.id, user.email)
+    elif submitted_otp == "123456" and not demo_active:
+        # Strictly reject dummy OTP for any non-allowlisted account
         is_match = False
     else:
         lookup_target = record.email or record.mobile or lookup_email
@@ -380,8 +447,8 @@ def send_otp(req: schemas.OTPRequest, db: Session = Depends(get_db)):
             )
 
     # 2. Generate secure 6-digit OTP & salted hash
-    dummy_active = is_dummy_otp_mode_active()
-    if dummy_active:
+    demo_active = is_demo_otp_active_for_email(normalized_email)
+    if demo_active:
         otp = "123456"
     else:
         otp = generate_secure_otp(6)
@@ -402,15 +469,18 @@ def send_otp(req: schemas.OTPRequest, db: Session = Depends(get_db)):
     db.add(otp_record)
     db.commit()
 
-    # 4. Dispatch Email via Gmail SMTP (skip if dummy OTP mode is active)
-    if dummy_active:
+    # 4. Dispatch Email via Gmail SMTP (skip if demo OTP mode is active for this account)
+    if demo_active:
+        staging_mode = is_staging_universal_otp_active()
+        mode_label = "[STAGING DEMO]" if staging_mode else "[DEMO MODE]"
         logger.info(
-            "DEV_DUMMY_OTP_ENABLED: Generated dummy OTP 123456 for %s (email dispatch skipped).",
+            "DEMO_OTP: %s Generated demo OTP 123456 for %s (email dispatch skipped).",
+            mode_label,
             normalized_email
         )
         return schemas.OTPResponse(
             success=True,
-            message=f"[DEV MODE] Dummy OTP 123456 generated for {normalized_email}. Use 123456 to verify."
+            message=f"{mode_label} Demo OTP 123456 generated for {normalized_email}. Use 123456 to verify."
         )
 
     email_result = send_email_otp(normalized_email, otp)
@@ -480,20 +550,18 @@ def verify_otp(req: schemas.OTPVerify, db: Session = Depends(get_db)):
             detail="OTP has expired. Please request a new OTP."
         )
 
-    # Verify submitted OTP against stored hash (with safe dummy OTP handling for dev)
+    # Verify submitted OTP against stored hash (with safe demo OTP handling for allowlisted demo accounts)
     lookup_target = record.email or record.mobile or target_identifier
     submitted_otp = req.otp.strip()
 
-    dummy_active = is_dummy_otp_mode_active()
-    env_name = os.getenv("ENVIRONMENT", os.getenv("ENV", "")).strip().lower()
-    is_prod = env_name in ("production", "prod", "live") or bool(os.getenv("RENDER")) or bool(os.getenv("RENDER_SERVICE_ID"))
+    demo_active = is_demo_otp_active_for_email(lookup_target)
 
     is_match = False
-    if dummy_active and submitted_otp == "123456":
+    if demo_active and submitted_otp == "123456":
         is_match = True
-        logger.info("DEV_DUMMY_OTP_ENABLED: Verified dummy OTP 123456 for %s.", lookup_target)
-    elif is_prod and submitted_otp == "123456":
-        # In production, strictly reject dummy OTP 123456
+        logger.info("DEMO_OTP: Verified demo OTP 123456 for allowlisted account %s.", lookup_target)
+    elif submitted_otp == "123456" and not demo_active:
+        # Strictly reject dummy OTP for any non-allowlisted account
         is_match = False
     else:
         is_match = verify_otp_hash(submitted_otp, lookup_target, record.otp_hash)

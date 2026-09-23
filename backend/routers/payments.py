@@ -377,3 +377,98 @@ def submit_rating(req: schemas.RatingCreate, user: models.User = Depends(get_cur
         feedback=req.feedback
     )
     return submit_customer_feedback(fb_req, user, db)
+
+
+@router.post("/qr/{booking_id}")
+def create_payment_qr(
+    booking_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Creates a Razorpay Payment Link with QR code for the booking.
+    Returns short_url (payment link) and qr_code_url (scannable QR image).
+    """
+    booking = db.query(models.Booking).filter(models.Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+
+    if user.role == "CUSTOMER":
+        if not user.customer or booking.customer_id != user.customer.id:
+            raise HTTPException(status_code=403, detail="Not authorized.")
+
+    if booking.payment and booking.payment.status == "PAID":
+        raise HTTPException(status_code=400, detail="Booking already paid.")
+
+    import os
+    from dotenv import load_dotenv
+    from pathlib import Path
+    load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=True)
+
+    key_id = os.getenv("RAZORPAY_KEY_ID", "").strip()
+    key_secret = os.getenv("RAZORPAY_KEY_SECRET", "").strip()
+
+    if not key_id or not key_secret:
+        raise HTTPException(status_code=500, detail="Razorpay credentials not configured.")
+
+    amount_paise = int(booking.total_amount * 100)
+    customer_name = booking.customer.full_name if booking.customer else "Customer"
+    customer_mobile = booking.customer.user.mobile if booking.customer and booking.customer.user else ""
+
+    try:
+        import razorpay
+        client = razorpay.Client(auth=(key_id, key_secret))
+
+        payload = {
+            "amount": amount_paise,
+            "currency": "INR",
+            "accept_partial": False,
+            "description": f"CoopConnect: {booking.service_type} - #{booking.booking_number}",
+            "customer": {
+                "name": customer_name,
+                "contact": f"+91{customer_mobile}" if customer_mobile else "+919999999999",
+            },
+            "notify": {"sms": False, "email": False},
+            "reminder_enable": False,
+            "notes": {
+                "booking_id": str(booking.id),
+                "booking_number": booking.booking_number,
+                "service": booking.service_type
+            },
+            "callback_url": "",
+            "callback_method": ""
+        }
+
+        link = client.payment_link.create(payload)
+        short_url = link.get("short_url", "")
+        link_id = link.get("id", "")
+
+        # Build QR code URL using Razorpay's QR image endpoint
+        import hmac as _hmac, hashlib as _hashlib, base64 as _b64
+        # Razorpay payment links expose a QR at: https://api.razorpay.com/v1/payment_links/{id}/qr
+        # Use a free QR generation service as fallback since Razorpay QR needs auth
+        qr_data = short_url or f"upi://pay?pa=coopconnect@razorpay&pn=CoopConnect&am={booking.total_amount}&tn={booking.booking_number}"
+        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={qr_data}"
+
+        return {
+            "success": True,
+            "payment_link": short_url,
+            "link_id": link_id,
+            "qr_code_url": qr_url,
+            "amount": booking.total_amount,
+            "booking_number": booking.booking_number
+        }
+
+    except Exception as e:
+        # Fallback: generate QR for UPI deep link
+        upi_string = f"upi://pay?pa=coopconnect@razorpay&pn=CoopConnect&am={booking.total_amount}&tn={booking.booking_number}&cu=INR"
+        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={upi_string}"
+        return {
+            "success": True,
+            "payment_link": None,
+            "link_id": None,
+            "qr_code_url": qr_url,
+            "amount": booking.total_amount,
+            "booking_number": booking.booking_number,
+            "note": "UPI QR fallback"
+        }

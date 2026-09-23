@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { 
   Wrench, CheckCircle2, AlertTriangle, Clock, MapPin, 
   Phone, Compass, Star, DollarSign, HeartHandshake, 
-  Camera, ArrowRight, ShieldCheck, Power, X, Building2
+  Camera, ArrowRight, ShieldCheck, Power, X, Building2,
+  Navigation
 } from "lucide-react";
 import { api, getUserRole } from "@/lib/api";
 
@@ -135,6 +136,26 @@ export default function WorkerDashboard() {
       loadWorkerData();
     } catch (e: any) {
       alert(e.message || "Failed to start service");
+    }
+  };
+
+  const handleOnTheWay = async (bookingId: number) => {
+    try {
+      await api.worker.markOnTheWay(bookingId);
+      alert("Customer notified that you are on the way!");
+      loadWorkerData();
+    } catch (e: any) {
+      alert(e.message || "Failed to update status");
+    }
+  };
+
+  const handleArrived = async (bookingId: number) => {
+    try {
+      await api.worker.markArrived(bookingId);
+      alert("Customer notified that you have arrived!");
+      loadWorkerData();
+    } catch (e: any) {
+      alert(e.message || "Failed to update status");
     }
   };
 
@@ -425,6 +446,17 @@ export default function WorkerDashboard() {
                     <Clock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
                     <span>{job.scheduled_date} • {job.scheduled_time}</span>
                   </div>
+                  {job.customer_lat && job.customer_lng && (
+                    <a
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${job.customer_lat},${job.customer_lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 mt-0.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[11px] font-semibold transition"
+                    >
+                      <Navigation className="w-3 h-3" />
+                      Preview Location
+                    </a>
+                  )}
                   <div className="text-[11px] text-blue-700 pt-1 border-t border-gray-200/60 font-medium">
                     Fairness Score: <strong>{job.suitability_score}/100</strong> • Matched based on opportunity balance
                   </div>
@@ -500,15 +532,47 @@ export default function WorkerDashboard() {
                     <MapPin className="w-3 h-3 text-gray-400" />
                     <span>{job.customer_address}</span>
                   </p>
+                  {job.customer_lat && job.customer_lng && (
+                    <a
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${job.customer_lat},${job.customer_lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 mt-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[11px] font-semibold transition"
+                    >
+                      <Navigation className="w-3 h-3" />
+                      Get Directions
+                    </a>
+                  )}
                 </div>
 
                 <div className="flex gap-3 pt-2">
                   {job.status === "ACCEPTED" && (
                     <button
-                      onClick={() => handleStartJob(job.booking_id)}
-                      className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-xs"
+                      onClick={() => handleOnTheWay(job.booking_id)}
+                      className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-xs flex items-center justify-center gap-1.5"
                     >
-                      Start Service
+                      <Navigation className="w-4 h-4" />
+                      <span>I'm On The Way</span>
+                    </button>
+                  )}
+
+                  {job.status === "ON_THE_WAY" && (
+                    <button
+                      onClick={() => handleArrived(job.booking_id)}
+                      className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs shadow-xs flex items-center justify-center gap-1.5"
+                    >
+                      <MapPin className="w-4 h-4" />
+                      <span>I've Arrived</span>
+                    </button>
+                  )}
+
+                  {job.status === "ARRIVED" && (
+                    <button
+                      onClick={() => handleStartJob(job.booking_id)}
+                      className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-xs flex items-center justify-center gap-1.5"
+                    >
+                      <Wrench className="w-4 h-4" />
+                      <span>Start Service</span>
                     </button>
                   )}
 

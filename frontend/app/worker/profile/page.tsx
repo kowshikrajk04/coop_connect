@@ -14,8 +14,10 @@ export default function WorkerProfilePage() {
   const [profile, setProfile] = useState<any>(null);
   const [performance, setPerformance] = useState<any>(null);
   const [isLoadingPerf, setIsLoadingPerf] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    setIsLoading(true);
     api.worker.getProfile()
       .then((p) => {
         setProfile(p);
@@ -27,7 +29,8 @@ export default function WorkerProfilePage() {
             .finally(() => setIsLoadingPerf(false));
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setIsLoading(false));
   }, []);
 
   const handleLogout = () => {
@@ -43,6 +46,10 @@ export default function WorkerProfilePage() {
           Review your performance standing, customer feedback, cooperative membership, and skill assessments
         </p>
       </div>
+
+      {isLoading && (
+        <div className="p-12 text-center text-sm text-gray-400">Loading your profile...</div>
+      )}
 
       {/* WORKER PERFORMANCE & LEADERBOARD STANDING */}
       <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-blue-950 text-white rounded-2xl p-6 sm:p-8 shadow-md">
@@ -168,8 +175,10 @@ export default function WorkerProfilePage() {
               {profile?.full_name ? profile.full_name.charAt(0) : "W"}
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{profile?.full_name}</h2>
-              <span className="text-xs text-gray-500">Address: {profile?.address}</span>
+              <h2 className="text-xl font-bold text-gray-900">{profile?.full_name || "Worker"}</h2>
+              <span className="text-xs text-gray-500">
+                {profile?.address ? `Address: ${profile.address}` : "Address: Not provided"}
+              </span>
             </div>
           </div>
 
@@ -183,14 +192,58 @@ export default function WorkerProfilePage() {
         </div>
 
         {/* Contact info */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
           <div className="p-3 bg-gray-50 rounded-xl">
             <span className="text-gray-400 block text-[10px] uppercase font-bold">Mobile Phone</span>
-            <span className="font-semibold text-gray-900 block mt-1">+91 {profile?.mobile}</span>
+            <span className="font-semibold text-gray-900 block mt-1">
+              {profile?.mobile ? `+91 ${profile.mobile}` : "Not provided"}
+            </span>
           </div>
           <div className="p-3 bg-gray-50 rounded-xl">
             <span className="text-gray-400 block text-[10px] uppercase font-bold">Email Address</span>
-            <span className="font-semibold text-gray-900 block mt-1">{profile?.email}</span>
+            <span className="font-semibold text-gray-900 block mt-1">
+              {profile?.email || "Not provided"}
+            </span>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-xl">
+            <span className="text-gray-400 block text-[10px] uppercase font-bold">Home Address</span>
+            <span className="font-semibold text-gray-900 block mt-1">
+              {profile?.address || "Not provided"}
+            </span>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-xl">
+            <span className="text-gray-400 block text-[10px] uppercase font-bold">Date of Birth</span>
+            <span className="font-semibold text-gray-900 block mt-1">
+              {profile?.dob || "Not provided"}
+            </span>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-xl">
+            <span className="text-gray-400 block text-[10px] uppercase font-bold">Cooperative</span>
+            <span className="font-semibold text-gray-900 block mt-1">
+              {profile?.cooperative_name || "Not joined"}
+            </span>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-xl">
+            <span className="text-gray-400 block text-[10px] uppercase font-bold">Membership Status</span>
+            <span className={`font-semibold block mt-1 ${
+              profile?.membership_status === "ACTIVE" ? "text-emerald-700" :
+              profile?.membership_status === "PENDING" ? "text-amber-700" : "text-gray-600"
+            }`}>
+              {profile?.membership_status || "NOT_JOINED"}
+            </span>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-xl">
+            <span className="text-gray-400 block text-[10px] uppercase font-bold">Jobs</span>
+            <span className="font-semibold text-gray-900 block mt-1">
+              {profile?.total_jobs ?? 0} total · {profile?.completed_jobs ?? 0} completed
+            </span>
+          </div>
+          <div className="p-3 bg-gray-50 rounded-xl">
+            <span className="text-gray-400 block text-[10px] uppercase font-bold">Opportunity Score</span>
+            <span className="font-semibold text-gray-900 block mt-1">
+              {profile?.opportunity_score ?? 100}/100
+              <span className="text-gray-400 font-normal ml-1">(fairness index)</span>
+            </span>
           </div>
         </div>
 
@@ -212,14 +265,22 @@ export default function WorkerProfilePage() {
           <h3 className="text-sm font-bold text-gray-900 mb-3">Practical Skill Assessments</h3>
           <div className="space-y-2">
             {profile?.assessments?.map((a: any) => (
-              <div key={a.id} className="p-3 bg-emerald-50/50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
+              <div key={a.id} className={`p-3 border rounded-xl flex items-center justify-between text-xs ${
+                a.score >= 60
+                  ? "bg-emerald-50/50 border-emerald-200"
+                  : "bg-red-50/50 border-red-200"
+              }`}>
                 <div>
                   <span className="font-bold text-gray-900">{a.skill_name} Assessment</span>
                   <p className="text-gray-500 text-[11px]">{a.assessment_date}</p>
                 </div>
                 <div className="text-right">
-                  <span className="font-extrabold text-emerald-800 text-sm block">{a.score}/100</span>
-                  <span className="text-[10px] text-emerald-700 font-medium">PASSED</span>
+                  <span className={`font-extrabold text-sm block ${a.score >= 60 ? "text-emerald-800" : "text-red-700"}`}>
+                    {a.score}/100
+                  </span>
+                  <span className={`text-[10px] font-bold ${a.score >= 60 ? "text-emerald-700" : "text-red-600"}`}>
+                    {a.score >= 60 ? "✓ PASSED" : "✗ FAILED"}
+                  </span>
                 </div>
               </div>
             ))}

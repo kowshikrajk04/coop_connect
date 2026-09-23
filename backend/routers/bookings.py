@@ -103,6 +103,7 @@ def create_booking(
 
     allocated_worker = None
     allocation_info = None
+    nearby_workers = []
 
     if ranked:
         top_match = ranked[0]
@@ -154,6 +155,21 @@ def create_booking(
         }
         allocation_info = top_match
 
+        # Top 3 nearby workers from ranked list for customer display
+        for match in ranked[:3]:
+            w = db.query(models.Worker).filter(models.Worker.id == match["worker_id"]).first()
+            if w:
+                nearby_workers.append({
+                    "id": w.id,
+                    "name": w.full_name,
+                    "rating": w.rating,
+                    "distance_km": round(match["distance_km"], 1),
+                    "skills": [s.skill_name for s in w.skills],
+                    "completed_jobs": w.completed_jobs,
+                    "suitability_score": round(match["suitability_score"], 1),
+                    "is_allocated": w.id == selected_worker.id
+                })
+
     return {
         "success": True,
         "id": new_booking.id,
@@ -166,6 +182,7 @@ def create_booking(
         "total_amount": new_booking.total_amount,
         "allocated_worker": allocated_worker,
         "allocation_metrics": allocation_info,
+        "nearby_workers": nearby_workers,
         "message": "Fairness-aware allocation completed." if allocated_worker else "Booking registered. Currently searching for an available verified cooperative worker in your area."
     }
 
@@ -226,3 +243,136 @@ def get_booking_details(booking_id: int, user: models.User = Depends(get_current
             "feedback": b.rating.feedback
         } if b.rating else None
     }
+
+
+@router.post("/{booking_id}/reallocate")
+def reallocate_booking(
+    booking_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Re-run worker allocation for a REQUESTED booking that has no worker yet."""
+    booking = db.query(models.Booking).filter(models.Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+
+    # Only customer who owns it or cooperative can trigger reallocation
+    is_owner = user.role == "CUSTOMER" and user.customer and booking.customer_id == user.customer.id
+    is_coop = user.role == "COOPERATIVE"
+    if not (is_owner or is_coop):
+        raise HTTPException(status_code=403, detail="Not authorized.")
+
+    if booking.status not in ("REQUESTED", "ALLOCATED"):
+        raise HTTPException(status_code=400, detail=f"Cannot reallocate booking in status '{booking.status}'.")
+
+    candidates = db.query(models.Worker).options(
+        joinedload(models.Worker.skills),
+        joinedload(models.Worker.assessments)
+    ).filter(
+        models.Worker.status == "VERIFIED",
+        models.Worker.membership_status == "ACTIVE"
+    ).all()
+
+    worker_dicts = []
+    for w in candidates:
+        skills = [{"skill_name": s.skill_name, "years_experience": s.years_experience} for s in w.skills]
+        assessments = [{"skill_name": a.skill_name, "score": a.score} for a in w.assessments]
+        worker_dicts.append({
+            "id": w.id, "full_name": w.full_name, "mobile": w.mobile,
+            "status": w.status, "is_available": w.is_available,
+            "latitude": w.latitude, "longitude": w.longitude,
+            "rating": w.rating, "total_jobs": w.total_jobs,
+            "completed_jobs": w.completed_jobs, "active_jobs": w.active_jobs,
+            "skills": skills, "assessments": assessments
+        })
+
+    ranked = allocator.rank_workers(
+        service_type=booking.service_type,
+        customer_lat=booking.customer_lat,
+        customer_lng=booking.customer_lng,
+        candidate_workers=worker_dicts,
+        is_emergency=booking.is_emergency,
+        emergency_priority=booking.emergency_priority
+    )
+
+    if not ranked:
+        return {"success": False, "message": "No eligible verified workers found. Please try again later."}
+
+    top = ranked[0]
+    selected_worker = db.query(models.Worker).filter(models.Worker.id == top["worker_id"]).first()
+
+    booking.worker_id = selected_worker.id
+    booking.cooperative_id = selected_worker.cooperative_id
+    booking.status = "ALLOCATED"
+
+    db.add(models.WorkerAllocation(
+        booking_id=booking.id, worker_id=selected_worker.id,
+        suitability_score=top["suitability_score"], skill_score=top["skill_score"],
+        success_score=top["success_score"], availability_score=top["availability_score"],
+        distance_score=top["distance_score"], rating_score=top["rating_score"],
+        fairness_factor=top["fairness_factor"], status="OFFERED"
+    ))
+    db.add(models.Notification(
+        user_id=selected_worker.user_id,
+        title=f"New Job: {booking.service_type}",
+        message=f"Booking #{booking.booking_number} at {booking.customer_address}.",
+        type="INFO"
+    ))
+    db.add(models.Notification(
+        user_id=booking.customer.user_id,
+        title="Worker Found!",
+        message=f"{selected_worker.full_name} has been matched to your booking #{booking.booking_number}.",
+        type="SUCCESS"
+    ))
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"Worker {selected_worker.full_name} allocated successfully.",
+        "worker_name": selected_worker.full_name,
+        "worker_mobile": selected_worker.mobile,
+        "distance_km": top["distance_km"]
+    }
+
+
+@router.post("/{booking_id}/cancel")
+def cancel_booking(
+    booking_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Customer can cancel a booking that is not yet IN_PROGRESS or COMPLETED."""
+    booking = db.query(models.Booking).filter(models.Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+
+    is_owner = user.role == "CUSTOMER" and user.customer and booking.customer_id == user.customer.id
+    is_worker = user.role == "WORKER" and user.worker and booking.worker_id == user.worker.id
+    if not (is_owner or is_worker):
+        raise HTTPException(status_code=403, detail="Not authorized to cancel this booking.")
+
+    if booking.status in ("IN_PROGRESS", "COMPLETED", "CANCELLED"):
+        raise HTTPException(status_code=400, detail=f"Cannot cancel a booking with status '{booking.status}'.")
+
+    booking.status = "CANCELLED"
+    db.commit()
+
+    # Notify worker if assigned
+    if booking.worker_id and booking.worker:
+        db.add(models.Notification(
+            user_id=booking.worker.user_id,
+            title="Booking Cancelled",
+            message=f"Booking #{booking.booking_number} ({booking.service_type}) has been cancelled by the customer.",
+            type="ALERT"
+        ))
+    # Notify customer
+    if booking.customer:
+        db.add(models.Notification(
+            user_id=booking.customer.user_id,
+            title="Booking Cancelled",
+            message=f"Your booking #{booking.booking_number} for {booking.service_type} has been cancelled.",
+            type="INFO"
+        ))
+    db.commit()
+
+    return {"success": True, "message": f"Booking #{booking.booking_number} cancelled successfully."}

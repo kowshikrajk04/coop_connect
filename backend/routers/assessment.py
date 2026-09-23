@@ -192,7 +192,7 @@ def submit_complete_assessment(
         worker_id=target_worker_id or 1,
         skill_name=payload.skill,
         score=payload.percentage,
-        passed=payload.passed,
+        passed=payload.percentage >= 60,  # Always derive from score, never trust client
         language=payload.preferred_language,
         answers_json=answers_json_str,
         voice_transcript=payload.all_transcripts or "10 practical scenario questions answered via voice.",

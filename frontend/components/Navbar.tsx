@@ -281,7 +281,9 @@ export default function Navbar() {
                   >
                     <Bell className="w-5 h-5" />
                     {notifications.some((n) => !n.read) && (
-                      <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white"></span>
+                      <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full ring-2 ring-white text-white text-[10px] font-bold flex items-center justify-center px-1">
+                        {notifications.filter((n) => !n.read).length}
+                      </span>
                     )}
                   </button>
 
@@ -290,19 +292,48 @@ export default function Navbar() {
                     <div className="absolute right-0 mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-lg p-3 z-50">
                       <div className="flex items-center justify-between pb-2 border-b border-gray-100">
                         <span className="font-semibold text-sm text-gray-900">Notifications</span>
-                        <span className="text-xs text-gray-500">{notifications.length} updates</span>
+                        <div className="flex items-center gap-2">
+                          {notifications.some(n => !n.read) && (
+                            <button
+                              onClick={async () => {
+                                const unread = notifications.filter(n => !n.read);
+                                await Promise.all(unread.map(n => api.notifications.markRead(n.id).catch(() => {})));
+                                setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+                              }}
+                              className="text-[10px] font-semibold text-blue-600 hover:underline"
+                            >
+                              Mark all read
+                            </button>
+                          )}
+                          <span className="text-xs text-gray-400">{notifications.length} total</span>
+                        </div>
                       </div>
-                      <div className="max-h-64 overflow-y-auto divide-y divide-gray-50 mt-1">
+                      <div className="max-h-72 overflow-y-auto divide-y divide-gray-50 mt-1">
                         {notifications.length === 0 ? (
-                          <div className="py-6 text-center text-xs text-gray-400">
-                            No notifications yet
-                          </div>
+                          <div className="py-6 text-center text-xs text-gray-400">No notifications yet</div>
                         ) : (
                           notifications.map((n) => (
-                            <div key={n.id} className="py-2.5 text-xs">
-                              <p className="font-medium text-gray-800">{n.title}</p>
-                              <p className="text-gray-500 mt-0.5">{n.message}</p>
-                              <span className="text-[10px] text-gray-400 mt-1 block">{n.created_at}</span>
+                            <div
+                              key={n.id}
+                              onClick={async () => {
+                                if (!n.read) {
+                                  await api.notifications.markRead(n.id).catch(() => {});
+                                  setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+                                }
+                              }}
+                              className={`py-2.5 px-2 rounded-lg text-xs cursor-pointer transition ${n.read ? "opacity-60" : "bg-blue-50/60 hover:bg-blue-50"}`}
+                            >
+                              <div className="flex items-start gap-2">
+                                <span className={`w-2 h-2 rounded-full mt-1 flex-shrink-0 ${
+                                  n.type === "SUCCESS" ? "bg-emerald-500" :
+                                  n.type === "ALERT" ? "bg-red-500" : "bg-blue-500"
+                                }`} />
+                                <div>
+                                  <p className="font-semibold text-gray-800">{n.title}</p>
+                                  <p className="text-gray-500 mt-0.5 leading-snug">{n.message}</p>
+                                  <span className="text-[10px] text-gray-400 mt-1 block">{n.created_at}</span>
+                                </div>
+                              </div>
                             </div>
                           ))
                         )}

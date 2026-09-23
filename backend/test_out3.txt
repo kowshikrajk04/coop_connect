@@ -1,0 +1,104 @@
+
+--- 1. Testing Reset to Initial Empty State (if demo router mounted) ---
+F
+--- Testing Restricted Demo OTP & Security Flow ---
+[OK] Unregistered email rejected with 404: No account found with this email. Please check your email or sign up.
+[OK] Dummy OTP strictly rejected when DEMO_OTP_ENABLED=false: Invalid OTP code. 2 attempt(s) remaining.
+[OK] Demo OTP generation allowed for allowlisted account on Render: [DEMO MODE] Demo OTP 123456 generated for customer@demo.com. Use 123456 to verify.
+[OK] Demo OTP 123456 successfully authenticated allowlisted account: Ananya Roy Role: CUSTOMER
+[OK] Dummy OTP 123456 strictly rejected for non-allowlisted account (cooperative@delhi.gov.in): Invalid OTP code. 4 attempt(s) remaining.
+[OK] Wrong OTP rejected for allowlisted account with attempts decrement: Invalid OTP code. 4 attempt(s) remaining.
+[OK] Dummy OTP strictly rejected in production when DEMO_OTP_EMAIL is missing.
+F
+================================== FAILURES ===================================
+E   psycopg2.errors.InsufficientPrivilege: permission denied to set parameter "session_replication_role"
+
+The above exception was the direct cause of the following exception:
+E   sqlalchemy.exc.ProgrammingError: (psycopg2.errors.InsufficientPrivilege) permission denied to set parameter "session_replication_role"
+    
+    [SQL: SET session_replication_role = replica;]
+    (Background on this error at: https://sqlalche.me/e/20/f405)
+C:\Users\balaj\AppData\Roaming\Python\Python313\site-packages\sqlalchemy\engine\default.py:951: sqlalchemy.exc.ProgrammingError: (psycopg2.errors.InsufficientPrivilege) permission denied to set parameter "session_replication_role"
+E   assert 404 == 200
+     +  where 404 = <Response [404 Not Found]>.status_code
+C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\test_suite.py:257: assert 404 == 200
+============================== warnings summary ===============================
+schemas.py:57
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:57: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class UserOut(BaseModel):
+
+schemas.py:69
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:69: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class CustomerOut(BaseModel):
+
+schemas.py:81
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:81: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class WorkerSkillSchema(BaseModel):
+
+schemas.py:97
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:97: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class SkillAssessmentSchema(BaseModel):
+
+schemas.py:136
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:136: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class WorkerOut(BaseModel):
+
+schemas.py:166
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:166: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class CooperativeOut(BaseModel):
+
+schemas.py:212
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:212: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class BookingOut(BaseModel):
+
+schemas.py:284
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:284: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class InvoiceOut(BaseModel):
+
+schemas.py:305
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:305: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class RatingOut(BaseModel):
+
+schemas.py:325
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:325: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class FeedbackOut(BaseModel):
+
+schemas.py:380
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:380: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class WelfareTransactionOut(BaseModel):
+
+schemas.py:416
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:416: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class NotificationOut(BaseModel):
+
+schemas.py:437
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:437: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class VerifiedCooperativeOut(BaseModel):
+
+schemas.py:451
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\schemas.py:451: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class CooperativeMembershipOut(BaseModel):
+
+test_suite.py::test_otp_verification_and_dummy_mode
+test_suite.py::test_otp_verification_and_dummy_mode
+test_suite.py::test_otp_verification_and_dummy_mode
+test_suite.py::test_otp_verification_and_dummy_mode
+test_suite.py::test_otp_verification_and_dummy_mode
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\routers\auth.py:323: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.datetime.utcnow()
+
+test_suite.py::test_otp_verification_and_dummy_mode
+test_suite.py::test_otp_verification_and_dummy_mode
+test_suite.py::test_otp_verification_and_dummy_mode
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\routers\auth.py:433: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.datetime.utcnow()
+
+test_suite.py::test_otp_verification_and_dummy_mode
+  C:\Users\balaj\Downloads\coopconnect (4)\coopconnect\backend\auth_utils.py:36: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    expire = datetime.datetime.utcnow() + datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED test_suite.py::test_full_coopconnect_flow - sqlalchemy.exc.Programming...
+FAILED test_suite.py::test_otp_verification_and_dummy_mode - assert 404 == 200
+2 failed, 23 warnings in 55.56s

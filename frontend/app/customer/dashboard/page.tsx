@@ -7,9 +7,10 @@ import {
   Search, Zap, Droplet, Hammer, Paintbrush, Home, Heart, 
   Car, Flower2, Sparkles, Cpu, AlertTriangle, Calendar, 
   Clock, MapPin, CheckCircle2, ArrowRight, ShieldCheck, 
-  X, CreditCard, Star, FileText, ChevronRight
+  X, CreditCard, Star, FileText, ChevronRight, Loader2, Upload
 } from "lucide-react";
 import { api, getUserRole } from "@/lib/api";
+import { useCurrentLocation } from "@/lib/useCurrentLocation";
 
 const SERVICES = [
   { id: "Electrician", name: "Electrician", icon: Zap, price: 450, desc: "Switches, wiring, MCB & appliances" },
@@ -43,8 +44,10 @@ export default function CustomerDashboard() {
   const [isEmergency, setIsEmergency] = useState(false);
   const [emergencyReason, setEmergencyReason] = useState("");
   const [servicePhotoUrl, setServicePhotoUrl] = useState("");
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bookingSuccessMsg, setBookingSuccessMsg] = useState<any>(null);
+  const { isLocating, detect: detectLocation } = useCurrentLocation();
 
   useEffect(() => {
     // Set default date to today
@@ -103,6 +106,8 @@ export default function CustomerDashboard() {
         scheduled_date: bookingDate,
         scheduled_time: bookingTime,
         customer_address: serviceLocation || (customerProfile?.address ?? "City Centre"),
+        customer_lat: customerProfile?.latitude ?? null,
+        customer_lng: customerProfile?.longitude ?? null,
         service_photo_url: servicePhotoUrl || null,
       });
 
@@ -320,6 +325,17 @@ export default function CustomerDashboard() {
                     <p className="text-gray-600">
                       <strong>Proximity:</strong> ~{bookingSuccessMsg.allocated_worker.distance_km} km away
                     </p>
+                    {customerProfile?.latitude && customerProfile?.longitude && (
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${customerProfile.latitude},${customerProfile.longitude}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-lg bg-white hover:bg-blue-50 border border-blue-300 text-blue-700 text-[11px] font-semibold transition"
+                      >
+                        <MapPin className="w-3 h-3" />
+                        View Service Location on Map
+                      </a>
+                    )}
                     {bookingSuccessMsg.allocation_metrics && (
                       <div className="pt-2 border-t border-blue-200/60 text-[11px] text-gray-500">
                         Suitability Score: <strong>{bookingSuccessMsg.allocation_metrics.suitability_score}/100</strong> • Opportunity Need: <strong>{bookingSuccessMsg.allocation_metrics.opportunity_gap}</strong>
@@ -329,6 +345,51 @@ export default function CustomerDashboard() {
                 ) : (
                   <div className="p-4 bg-gray-50 rounded-xl text-xs text-gray-600">
                     {bookingSuccessMsg.message}
+                  </div>
+                )}
+
+                {/* Nearby Verified Workers */}
+                {bookingSuccessMsg.nearby_workers && bookingSuccessMsg.nearby_workers.length > 0 && (
+                  <div className="text-left space-y-2">
+                    <p className="text-xs font-bold text-gray-700 flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-blue-500" />
+                      Nearby Verified Workers in Your Area
+                    </p>
+                    <div className="space-y-2">
+                      {bookingSuccessMsg.nearby_workers.map((w: any) => (
+                        <div
+                          key={w.id}
+                          className={`p-3 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+                            w.is_allocated
+                              ? "bg-emerald-50 border-emerald-300"
+                              : "bg-gray-50 border-gray-200"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${
+                              w.is_allocated ? "bg-emerald-600 text-white" : "bg-gray-200 text-gray-700"
+                            }`}>
+                              {w.name.charAt(0)}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-gray-900">
+                                {w.name}
+                                {w.is_allocated && (
+                                  <span className="ml-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
+                                    ✓ Assigned to you
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-gray-500">{w.skills.join(", ")} • {w.completed_jobs} jobs done</p>
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="font-bold text-amber-600">★ {w.rating}</p>
+                            <p className="text-gray-500 text-[11px]">{w.distance_km} km away</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -417,27 +478,91 @@ export default function CustomerDashboard() {
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
                     Service Address / Location <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={serviceLocation}
-                    onChange={(e) => setServiceLocation(e.target.value)}
-                    placeholder="Flat / House No., Apartment, Street, City"
-                    className="w-full px-3 py-2 rounded-xl border border-gray-300 text-sm"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      value={serviceLocation}
+                      onChange={(e) => setServiceLocation(e.target.value)}
+                      placeholder="Flat / House No., Apartment, Street, City"
+                      className="w-full px-3 py-2 pr-36 rounded-xl border border-gray-300 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => detectLocation((addr) => setServiceLocation(addr))}
+                      disabled={isLocating}
+                      className="absolute right-1.5 top-1.5 bottom-1.5 px-2.5 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[10px] font-semibold flex items-center gap-1 transition disabled:opacity-60"
+                    >
+                      {isLocating ? <Loader2 className="w-3 h-3 animate-spin" /> : <MapPin className="w-3 h-3" />}
+                      <span>{isLocating ? "Detecting..." : "My Location"}</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
                     Upload Photo (Optional)
                   </label>
-                  <input
-                    type="text"
-                    value={servicePhotoUrl}
-                    onChange={(e) => setServicePhotoUrl(e.target.value)}
-                    placeholder="Optional photo link showing issue"
-                    className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs"
-                  />
+                  <div className="relative">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      id="service-photo-upload"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setIsUploadingPhoto(true);
+                        try {
+                          const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+                          const fd = new FormData();
+                          fd.append("file", file);
+                          const res = await fetch(`${API_BASE}/api/auth/upload`, {
+                            method: "POST",
+                            body: fd,
+                          });
+                          const data = await res.json();
+                          setServicePhotoUrl(`${API_BASE}${data.url}`);
+                        } catch {
+                          alert("Photo upload failed. Please try again.");
+                        } finally {
+                          setIsUploadingPhoto(false);
+                        }
+                      }}
+                    />
+                    <label
+                      htmlFor="service-photo-upload"
+                      className={`flex items-center gap-2 w-full px-3 py-2.5 rounded-xl border border-dashed cursor-pointer text-xs transition ${
+                        servicePhotoUrl
+                          ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                          : "border-gray-300 bg-gray-50 hover:bg-blue-50 hover:border-blue-400 text-gray-500"
+                      }`}
+                    >
+                      {isUploadingPhoto ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                          <span>Uploading...</span>
+                        </>
+                      ) : servicePhotoUrl ? (
+                        <>
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span className="font-semibold">Photo uploaded ✓</span>
+                          <span
+                            className="ml-auto text-gray-400 hover:text-red-500 font-bold"
+                            onClick={(e) => { e.preventDefault(); setServicePhotoUrl(""); }}
+                          >✕</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-4 h-4 text-gray-400" />
+                          <span>Click to upload photo of the issue</span>
+                        </>
+                      )}
+                    </label>
+                  </div>
+                  {servicePhotoUrl && (
+                    <img src={servicePhotoUrl} alt="preview" className="mt-2 h-20 rounded-xl object-cover border border-gray-200" />
+                  )}
                 </div>
 
                 {/* EMERGENCY TOGGLE WITH STRICT POLICY */}

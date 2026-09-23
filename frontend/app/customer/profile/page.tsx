@@ -3,8 +3,9 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { User, MapPin, Phone, Mail, HelpCircle, LogOut, CheckCircle2, Shield } from "lucide-react";
+import { User, MapPin, Phone, Mail, HelpCircle, LogOut, CheckCircle2, Shield, Loader2 } from "lucide-react";
 import { api, clearAuthData } from "@/lib/api";
+import { useCurrentLocation } from "@/lib/useCurrentLocation";
 
 export default function CustomerProfilePage() {
   const router = useRouter();
@@ -12,6 +13,7 @@ export default function CustomerProfilePage() {
   const [address, setAddress] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const { isLocating, detect: detectLocation } = useCurrentLocation();
 
   useEffect(() => {
     api.customer.getProfile()
@@ -83,13 +85,24 @@ export default function CustomerProfilePage() {
           <label className="block text-sm font-semibold text-gray-700">
             Primary Service Address
           </label>
-          <input
-            type="text"
-            required
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            className="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500"
-          />
+          <div className="relative">
+            <input
+              type="text"
+              required
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              className="w-full px-4 py-2.5 pr-36 rounded-xl border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              type="button"
+              onClick={() => detectLocation((addr) => setAddress(addr))}
+              disabled={isLocating}
+              className="absolute right-1.5 top-1.5 bottom-1.5 px-3 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[11px] font-semibold flex items-center gap-1.5 transition disabled:opacity-60"
+            >
+              {isLocating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
+              <span>{isLocating ? "Detecting..." : "Use My Location"}</span>
+            </button>
+          </div>
 
           {saveSuccess && (
             <div className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
