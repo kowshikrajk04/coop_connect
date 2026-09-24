@@ -7,7 +7,8 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv
 from typing import Tuple
-import resend
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -53,12 +54,13 @@ def verify_otp_hash(submitted_otp: str, target: str, stored_hash: str) -> bool:
 
 def send_email_otp(recipient_email: str, otp: str) -> dict:
     """
-    Sends CoopConnect verification OTP using Resend HTTPS Email API.
+    Sends CoopConnect verification OTP using Brevo (Sendinblue) HTTPS Transactional Email API.
     Does not use SMTP, bypassing port 587 blocking on cloud platforms like Render Free.
     Logs errors securely without exposing credentials or OTP content.
     """
-    resend_api_key = os.getenv("RESEND_API_KEY", "").strip()
-    from_email = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev").strip() or "onboarding@resend.dev"
+    brevo_api_key = os.getenv("BREVO_API_KEY", "").strip()
+    from_email = os.getenv("BREVO_FROM_EMAIL", "").strip()
+    from_name = os.getenv("BREVO_FROM_NAME", "CoopConnect").strip() or "CoopConnect"
 
     try:
         otp_expiry_seconds = int(os.getenv("OTP_EXPIRY", "300"))
@@ -74,18 +76,20 @@ def send_email_otp(recipient_email: str, otp: str) -> dict:
         else "***"
     )
 
-    if not resend_api_key or resend_api_key == "YOUR_RESEND_API_KEY":
+    if (
+        not brevo_api_key
+        or brevo_api_key == "YOUR_BREVO_API_KEY"
+        or not from_email
+        or from_email == "your-verified-brevo-sender@example.com"
+    ):
         logger.warning(
-            "Resend credentials not configured (RESEND_API_KEY missing or placeholder)."
+            "Brevo credentials not configured (BREVO_API_KEY or BREVO_FROM_EMAIL missing/placeholder)."
         )
         return {
             "success": False,
             "reason": "credentials_missing",
             "message": "Email service is not configured."
         }
-
-    # Set Resend API key
-    resend.api_key = resend_api_key
 
     text_body = (
         f"Your CoopConnect verification OTP is: {otp}\n\n"
@@ -129,27 +133,58 @@ def send_email_otp(recipient_email: str, otp: str) -> dict:
 </body>
 </html>"""
 
-    params: resend.Emails.SendParams = {
-        "from": from_email if ("<" in from_email or "@" in from_email) else f"CoopConnect <{from_email}>",
-        "to": [recipient_email],
-        "subject": "CoopConnect Email Verification",
-        "text": text_body,
-        "html": html_body,
-    }
+    # Configure Brevo API Client
+    configuration = sib_api_v3_sdk.Configuration()
+    configuration.api_key["api-key"] = brevo_api_key
+
+    api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
+    sender = sib_api_v3_sdk.SendSmtpEmailSender(name=from_name, email=from_email)
+    to = [sib_api_v3_sdk.SendSmtpEmailTo(email=recipient_email)]
+
+    send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
+        sender=sender,
+        to=to,
+        subject="CoopConnect Email Verification",
+        text_content=text_body,
+        html_content=html_body,
+    )
 
     try:
-        response = resend.Emails.send(params)
+        api_response = api_instance.send_transac_email(send_smtp_email)
+        message_id = getattr(api_response, "message_id", None) or "sent"
         logger.info(
-            "Verification OTP email successfully dispatched to %s via Resend HTTPS API (id: %s).",
+            "Verification OTP email successfully dispatched to %s via Brevo HTTPS API (id: %s).",
             masked_target,
-            response.get("id") if isinstance(response, dict) else getattr(response, "id", "sent")
+            message_id
         )
         return {
             "success": True,
             "message": "Verification code sent to your email."
         }
+    except ApiException as e:
+        status_code = getattr(e, "status", "unknown")
+        response_body = getattr(e, "body", "") or "No response body"
+        reason = getattr(e, "reason", "") or "No reason provided"
+        logger.error(
+            "Brevo ApiException when sending OTP to %s | Status: %s | Reason: %s | Body: %s | Exception: %s",
+            masked_target,
+            status_code,
+            reason,
+            response_body,
+            str(e)
+        )
+        return {
+            "success": False,
+            "reason": "email_error",
+            "message": "Failed to send verification email."
+        }
     except Exception as e:
-        logger.error("Resend API error during OTP dispatch: %s", type(e).__name__)
+        logger.error(
+            "Unexpected error when sending OTP to %s via Brevo: %s (%s)",
+            masked_target,
+            type(e).__name__,
+            str(e)
+        )
         return {
             "success": False,
             "reason": "email_error",
