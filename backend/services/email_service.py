@@ -4,13 +4,10 @@ import hmac
 import hashlib
 import secrets
 import logging
-import smtplib
-import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 from dotenv import load_dotenv
 from typing import Tuple
+import resend
 
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -56,22 +53,12 @@ def verify_otp_hash(submitted_otp: str, target: str, stored_hash: str) -> bool:
 
 def send_email_otp(recipient_email: str, otp: str) -> dict:
     """
-    Sends CoopConnect verification OTP using Gmail SMTP (or configured SMTP host).
-    Supports STARTTLS (port 587) and SSL (port 465).
+    Sends CoopConnect verification OTP using Resend HTTPS Email API.
+    Does not use SMTP, bypassing port 587 blocking on cloud platforms like Render Free.
     Logs errors securely without exposing credentials or OTP content.
     """
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com").strip() or "smtp.gmail.com"
-    port_str = os.getenv("SMTP_PORT", "587").strip() or "587"
-    try:
-        smtp_port = int(port_str)
-    except ValueError:
-        smtp_port = 587
-
-    smtp_username = os.getenv("SMTP_USERNAME", "").strip()
-    smtp_password = os.getenv("SMTP_PASSWORD", "").strip()
-
-    # Strip spaces in app password if provided in 4x4 format (e.g. 'xxxx xxxx xxxx xxxx')
-    clean_password = smtp_password.replace(" ", "")
+    resend_api_key = os.getenv("RESEND_API_KEY", "").strip()
+    from_email = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev").strip() or "onboarding@resend.dev"
 
     try:
         otp_expiry_seconds = int(os.getenv("OTP_EXPIRY", "300"))
@@ -79,7 +66,7 @@ def send_email_otp(recipient_email: str, otp: str) -> dict:
         otp_expiry_seconds = 300
     expiry_minutes = max(1, otp_expiry_seconds // 60)
 
-    # Safely mask email addresses for logging
+    # Safely mask email address for logging
     parts = recipient_email.split("@")
     masked_target = (
         f"{parts[0][:3]}***@{parts[1]}"
@@ -87,28 +74,18 @@ def send_email_otp(recipient_email: str, otp: str) -> dict:
         else "***"
     )
 
-    user_parts = smtp_username.split("@")
-    masked_user = (
-        f"{user_parts[0][:3]}***@{user_parts[1]}"
-        if len(user_parts) == 2 and len(user_parts[0]) >= 3
-        else "***"
-    )
-
-    if not smtp_username or not clean_password:
+    if not resend_api_key or resend_api_key == "YOUR_RESEND_API_KEY":
         logger.warning(
-            "SMTP credentials not configured (SMTP_USERNAME or SMTP_PASSWORD missing)."
+            "Resend credentials not configured (RESEND_API_KEY missing or placeholder)."
         )
         return {
             "success": False,
             "reason": "credentials_missing",
-            "message": "SMTP credentials are not configured. Please set SMTP_USERNAME and SMTP_PASSWORD."
+            "message": "Email service is not configured."
         }
 
-    # Construct Multipart MIME message
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "CoopConnect Email Verification"
-    msg["From"] = f"CoopConnect <{smtp_username}>"
-    msg["To"] = recipient_email
+    # Set Resend API key
+    resend.api_key = resend_api_key
 
     text_body = (
         f"Your CoopConnect verification OTP is: {otp}\n\n"
@@ -152,93 +129,29 @@ def send_email_otp(recipient_email: str, otp: str) -> dict:
 </body>
 </html>"""
 
-    msg.attach(MIMEText(text_body, "plain", "utf-8"))
-    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    params: resend.Emails.SendParams = {
+        "from": from_email if ("<" in from_email or "@" in from_email) else f"CoopConnect <{from_email}>",
+        "to": [recipient_email],
+        "subject": "CoopConnect Email Verification",
+        "text": text_body,
+        "html": html_body,
+    }
 
     try:
-        if smtp_port == 465:
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=15) as server:
-                server.login(smtp_username, clean_password)
-                server.send_message(msg)
-        else:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-                server.ehlo()
-                context = ssl.create_default_context()
-                server.starttls(context=context)
-                server.ehlo()
-                server.login(smtp_username, clean_password)
-                server.send_message(msg)
-
+        response = resend.Emails.send(params)
         logger.info(
-            "Verification OTP email successfully dispatched to %s via SMTP (%s:%s).",
+            "Verification OTP email successfully dispatched to %s via Resend HTTPS API (id: %s).",
             masked_target,
-            smtp_host,
-            smtp_port
+            response.get("id") if isinstance(response, dict) else getattr(response, "id", "sent")
         )
         return {
             "success": True,
             "message": "Verification code sent to your email."
         }
-
-    except smtplib.SMTPAuthenticationError as e:
-        logger.error(
-            "SMTP authentication failed for user %s on %s:%s. Response code: %s",
-            masked_user,
-            smtp_host,
-            smtp_port,
-            getattr(e, 'smtp_code', 'auth_failed')
-        )
-        return {
-            "success": False,
-            "reason": "auth_error",
-            "message": "SMTP authentication failed. Verify your Google App Password and SMTP_USERNAME."
-        }
-
-    except smtplib.SMTPConnectError:
-        logger.error("Could not connect to SMTP server %s:%s", smtp_host, smtp_port)
-        return {
-            "success": False,
-            "reason": "connection_error",
-            "message": "Could not connect to the SMTP server. Check SMTP_HOST and SMTP_PORT."
-        }
-
-    except smtplib.SMTPServerDisconnected:
-        logger.error("SMTP server disconnected prematurely (%s:%s)", smtp_host, smtp_port)
-        return {
-            "success": False,
-            "reason": "server_disconnected",
-            "message": "Mail server disconnected unexpectedly. Please try again."
-        }
-
-    except (smtplib.SMTPRecipientsRefused, smtplib.SMTPSenderRefused) as e:
-        logger.error("SMTP sender or recipient address rejected: %s", type(e).__name__)
-        return {
-            "success": False,
-            "reason": "address_rejected",
-            "message": "Mail server rejected the recipient or sender address."
-        }
-
-    except (TimeoutError, smtplib.SMTPResponseException) as e:
-        logger.error("SMTP timeout or response exception: %s", type(e).__name__)
-        return {
-            "success": False,
-            "reason": "timeout",
-            "message": "Connection to mail server timed out or failed to respond. Please try again."
-        }
-
-    except smtplib.SMTPException as e:
-        logger.error("SMTP error during OTP dispatch: %s", type(e).__name__)
-        return {
-            "success": False,
-            "reason": "smtp_error",
-            "message": "Failed to send verification email due to a mail server error."
-        }
-
     except Exception as e:
-        logger.error("Unexpected error during OTP email dispatch: %s", type(e).__name__)
+        logger.error("Resend API error during OTP dispatch: %s", type(e).__name__)
         return {
             "success": False,
-            "reason": "system_error",
+            "reason": "email_error",
             "message": "Failed to send verification email."
         }
